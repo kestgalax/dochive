@@ -49,7 +49,7 @@ An environment fallback such as `DOCHIVE_PROXIES` can be added later for CI or s
 ## How It Was Verified
 
 - Verified the CLI help exposes `--anti-bot`.
-- Verified the package compiles with the bundled Python runtime.
+- Verified the package compiles in the local development runtime.
 
 ## Known Limitations
 

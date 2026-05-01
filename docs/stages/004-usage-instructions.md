@@ -4,14 +4,14 @@ Status: completed
 
 ## Intent
 
-Provide a practical instruction file that explains how to run the CLI in this Windows/Codex environment and how to use the first implemented workflows.
+Provide a practical instruction file that explains how to run the CLI and how to use the first implemented workflows.
 
 ## Changes
 
 - Added `docs/USAGE.md`.
 - Linked project docs from `README.md`.
 - Documented:
-  - PowerShell `PATH` setup.
+  - Initial setup.
   - Local HTML mirroring.
   - Web subtree mirroring.
   - Selector-based extraction tuning.
@@ -29,6 +29,6 @@ Provide a practical instruction file that explains how to run the CLI in this Wi
 - Reviewed commands against current CLI flags.
 - Confirmed `dochive --help`, `mirror --help`, `catalog`, and `query` commands exist.
 
-## Known Limitations
+## Follow-Up
 
-The instructions assume the bundled Python runtime path used by this Codex desktop workspace. A standalone install guide for a fresh machine should be added later.
+The initial instructions were later revised to use a cross-platform source install flow for Windows, Linux, and macOS.

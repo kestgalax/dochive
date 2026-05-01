@@ -10,33 +10,58 @@ CLI tool for mirroring HTML documentation into a Markdown-first repository:
 - local HTML folder mirroring without browser dependencies
 - recovery for documentation headings written as styled HTML, such as `p class="H4"` or MadCap `h2 data-mc-autonum`
 
+## Install
+
+Dochive requires Python 3.10 or newer.
+
+```bash
+git clone https://github.com/kestgalax/dochive.git
+cd dochive
+python -m venv .venv
+```
+
+Activate the virtual environment.
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Linux or macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+Install the package:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e .
+dochive --help
+```
+
 ## Usage
 
-```powershell
-dochive mirror --source .\site-html --out .\mirror --max-depth 3 --save-assets images,files
+Mirror local HTML:
+
+```bash
+dochive mirror --source ./site-html --out ./mirror --max-depth 3 --save-assets images,files
 ```
-
-Or with the bundled Python during development:
-
-```powershell
-C:\Users\me\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m dochive mirror --source .\site-html --out .\mirror
-```
-
-Prefer the `python -m dochive ...` form during development if you are editing `src/` directly. A previously installed `dochive` console script may point at an older package until it is reinstalled.
 
 For web crawling, install the optional Crawl4AI extra and run:
 
-```powershell
-dochive mirror --source https://docs.example.com --out .\mirror --render-js
+```bash
+python -m pip install -e ".[crawl4ai]"
+dochive mirror --source https://docs.example.com --out ./mirror --render-js
 ```
 
-On this Codex desktop runtime, the console script is installed outside PATH. Use:
+During development, editable installation keeps the `dochive` console command pointed at the current `src/` code. You can also run the package module directly from the repository root:
 
-```powershell
-$env:PATH = "C:\Users\me\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Scripts;$env:PATH"
+```bash
+python -m dochive --help
 ```
-
-Then `dochive ...` works in the current PowerShell session.
 
 ## Project Docs
 

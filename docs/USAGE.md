@@ -1,14 +1,72 @@
 # Dochive Usage
 
-## Setup In Current PowerShell Session
+## Requirements
 
-On this Codex desktop runtime, add the bundled Python scripts directory to `PATH`:
+- Python 3.10 or newer
+- Git
+- Optional: Crawl4AI dependencies for JavaScript-rendered web crawling
 
-```powershell
-$env:PATH = "C:\Users\me\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Scripts;$env:PATH"
+Dochive is a Python package with a `dochive` console command. The recommended setup is the same on Windows, Linux, and macOS: create a virtual environment, install the package, then run `dochive`.
+
+## Install From Source
+
+Clone the repository:
+
+```bash
+git clone https://github.com/kestgalax/dochive.git
+cd dochive
 ```
 
-Optional Crawl4AI runtime folders are kept inside the workspace:
+Create a virtual environment:
+
+```bash
+python -m venv .venv
+```
+
+Activate it on Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Activate it on Linux or macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+Upgrade `pip` and install Dochive in editable mode:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+Verify the CLI is available:
+
+```bash
+dochive --help
+```
+
+During development, editable installation keeps the `dochive` command pointed at the current `src/` code. You can also run the package module directly from the repository root:
+
+```bash
+python -m dochive --help
+```
+
+## Optional Web Crawling Dependencies
+
+Local HTML mirroring does not need browser dependencies. For JavaScript-rendered web documentation, install the optional Crawl4AI extra:
+
+```bash
+python -m pip install -e ".[crawl4ai]"
+```
+
+Then run web crawls with `--render-js`.
+
+Dochive sets workspace-local Crawl4AI defaults during web crawling. If you call Crawl4AI tools directly, you may set these variables yourself.
+
+Windows PowerShell:
 
 ```powershell
 $env:CRAWL4_AI_BASE_DIRECTORY = "$PWD\.crawl4ai-data"
@@ -16,17 +74,17 @@ $env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.playwright-browsers"
 $env:PYTHONIOENCODING = "utf-8"
 ```
 
-The CLI sets sane defaults for these during web crawling, but setting them explicitly is useful for direct Crawl4AI commands.
+Linux or macOS:
 
-During development, prefer running the package as a module from the repository root:
-
-```powershell
-C:\Users\me\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m dochive mirror --source "url" --out .\mirror
+```bash
+export CRAWL4_AI_BASE_DIRECTORY="$PWD/.crawl4ai-data"
+export PLAYWRIGHT_BROWSERS_PATH="$PWD/.playwright-browsers"
+export PYTHONIOENCODING="utf-8"
 ```
 
-This guarantees the current `src/` code is used. If you run the installed `dochive` console script, reinstall the package after code changes so it does not use an older installed copy.
-
 ## Mirror Local HTML
+
+Examples below use PowerShell line continuations. On Linux or macOS, use the same options in one line or replace trailing backticks with `\`.
 
 ```powershell
 dochive mirror `
