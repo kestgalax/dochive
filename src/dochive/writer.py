@@ -34,6 +34,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
 
     child_urls_by_parent = _build_child_mapping(pages)
     path_by_url = _build_path_mapping(pages, config, child_urls_by_parent)
+    order_by_url = _build_order_mapping(pages)
     now = datetime.now(timezone.utc).isoformat()
     written_pages: list[dict[str, object]] = []
     written_links: list[dict[str, object]] = []
@@ -50,7 +51,16 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
         written_errors.extend(asset_errors)
         markdown = _rewrite_markdown_links(page.markdown, page, relpath, path_by_url, assets, config)
         content_hash = "sha256:" + hashlib.sha256(markdown.encode("utf-8")).hexdigest()
-        frontmatter = _page_frontmatter(page, relpath, path_by_url, child_urls_by_parent, assets, now, content_hash)
+        frontmatter = _page_frontmatter(
+            page,
+            relpath,
+            path_by_url,
+            child_urls_by_parent,
+            order_by_url,
+            assets,
+            now,
+            content_hash,
+        )
         output_path.write_text("---\n" + dumps_yaml(frontmatter) + "---\n\n" + markdown, encoding="utf-8")
 
         written_pages.append(_page_catalog_entry(page, relpath, frontmatter))
@@ -84,7 +94,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
                 }
             )
 
-    _write_folder_indexes(root, pages, path_by_url)
+    _write_folder_indexes(root, pages, path_by_url, order_by_url)
     sync_report = _sync_report(previous_hashes, written_pages, source=config.source, generated_at=now)
     (catalog_dir / "pages.yaml").write_text(dumps_yaml({"pages": written_pages}), encoding="utf-8")
     (catalog_dir / "links.yaml").write_text(dumps_yaml({"links": written_links}), encoding="utf-8")
@@ -206,6 +216,7 @@ def _page_frontmatter(
     relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
     child_urls_by_parent: dict[str, list[str]],
+    order_by_url: dict[str, int],
     assets: list[Asset],
     crawled_at: str,
     content_hash: str,
@@ -222,6 +233,7 @@ def _page_frontmatter(
         "status_code": page.status_code,
         "depth": page.depth,
         "path": str(relpath),
+        "order": order_by_url.get(page.canonical_url, 0),
         "parent": parent,
         "children": children,
         "page_type": "doc",
@@ -247,6 +259,7 @@ def _page_catalog_entry(page: Page, relpath: PurePosixPath, frontmatter: dict[st
         "title": page.title,
         "source_url": page.source_url,
         "depth": page.depth,
+        "order": frontmatter["order"],
         "summary": frontmatter["summary"],
         "tags": frontmatter["tags"],
         "content_hash": frontmatter["content_hash"],
@@ -331,7 +344,20 @@ def _build_child_mapping(pages: list[Page]) -> dict[str, list[str]]:
     for page in pages:
         if page.parent_url in existing:
             children[page.parent_url].append(page.canonical_url)
-    return {parent: sorted(set(urls)) for parent, urls in children.items()}
+    return {parent: list(dict.fromkeys(urls)) for parent, urls in children.items()}
+
+
+def _build_order_mapping(pages: list[Page]) -> dict[str, int]:
+    existing = {page.canonical_url for page in pages}
+    sibling_groups: dict[str | None, list[str]] = defaultdict(list)
+    for page in pages:
+        parent = page.parent_url if page.parent_url in existing else None
+        sibling_groups[parent].append(page.canonical_url)
+    return {
+        url: index
+        for urls in sibling_groups.values()
+        for index, url in enumerate(dict.fromkeys(urls), start=1)
+    }
 
 
 def _local_html_relpath(path: Path) -> PurePosixPath:
@@ -346,7 +372,12 @@ def _local_html_relpath(path: Path) -> PurePosixPath:
     return PurePosixPath(*parts)
 
 
-def _write_folder_indexes(root: Path, pages: list[Page], path_by_url: dict[str, PurePosixPath]) -> None:
+def _write_folder_indexes(
+    root: Path,
+    pages: list[Page],
+    path_by_url: dict[str, PurePosixPath],
+    order_by_url: dict[str, int],
+) -> None:
     folders: dict[PurePosixPath, list[Page]] = defaultdict(list)
     for page in pages:
         folders[path_by_url[page.canonical_url].parent].append(page)
@@ -366,7 +397,10 @@ def _write_folder_indexes(root: Path, pages: list[Page], path_by_url: dict[str, 
             for candidate in all_folders
             if candidate != folder and candidate.parent == folder
         )
-        folder_pages = sorted(folders.get(folder, []), key=lambda page: str(path_by_url[page.canonical_url]))
+        folder_pages = sorted(
+            folders.get(folder, []),
+            key=lambda page: (order_by_url.get(page.canonical_url, 0), str(path_by_url[page.canonical_url])),
+        )
         payload = {
             "path": "" if str(folder) == "." else str(folder),
             "title": _folder_title(folder),
@@ -378,6 +412,7 @@ def _write_folder_indexes(root: Path, pages: list[Page], path_by_url: dict[str, 
                     "path": str(path_by_url[page.canonical_url]),
                     "title": page.title,
                     "source_url": page.source_url,
+                    "order": order_by_url.get(page.canonical_url, 0),
                     "tags": [],
                 }
                 for page in folder_pages
@@ -432,7 +467,38 @@ def _rewrite_markdown_links(
 
     markdown = LINK_RE.sub(replace, markdown)
     markdown = _rewrite_html_media_sources(markdown, page, current_relpath, path_by_url, asset_by_source)
+    markdown = _normalize_media_spacing(markdown)
     return _render_details_sections(markdown)
+
+
+def _normalize_media_spacing(markdown: str) -> str:
+    output: list[str] = []
+    lines = markdown.splitlines()
+    in_fence = False
+    for index, line in enumerate(lines):
+        if _is_fenced_code_line(line):
+            in_fence = not in_fence
+            output.append(line)
+            continue
+        if not in_fence and _is_media_line(line):
+            if output and output[-1].strip():
+                output.append("")
+            output.append(line.strip())
+            next_line = lines[index + 1] if index + 1 < len(lines) else ""
+            if next_line.strip():
+                output.append("")
+            continue
+        output.append(line)
+    return "\n".join(output)
+
+
+def _is_fenced_code_line(line: str) -> bool:
+    return bool(re.match(r"^\s*(```|~~~)", line))
+
+
+def _is_media_line(line: str) -> bool:
+    stripped = line.strip().lower()
+    return stripped.startswith(("<image ", "<video "))
 
 
 def _render_details_sections(markdown: str) -> str:

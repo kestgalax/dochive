@@ -1,7 +1,7 @@
 from pathlib import Path, PurePosixPath
 
 from dochive.models import Asset, MirrorConfig, Page
-from dochive.writer import _asset_relpath, _relative_asset_path, write_mirror
+from dochive.writer import _asset_relpath, _normalize_media_spacing, _relative_asset_path, write_mirror
 
 
 def test_writer_uses_gramax_index_for_pages_with_children(tmp_path: Path) -> None:
@@ -55,11 +55,14 @@ def test_writer_uses_gramax_index_for_pages_with_children(tmp_path: Path) -> Non
     links_catalog = (root / "_catalog" / "links.yaml").read_text(encoding="utf-8")
 
     assert 'path: "docs/beta_35/_index.md"' in parent_text
+    assert "order: 1" in parent_text
     assert 'children:\n  - "docs/beta_35/kakaya-to-stranica.md"' in parent_text
     assert 'parent: "docs/beta_35/_index.md"' in child_text
+    assert "order: 1" in child_text
     assert 'path: "docs/beta_35/_index.md"' in pages_catalog
     assert 'path: "docs/beta_35/kakaya-to-stranica.md"' in pages_catalog
     assert 'path: "docs/change_list_arch.md"' in pages_catalog
+    assert "order: 2" in pages_catalog
     assert 'to: "docs/beta_35/_index.md"' in links_catalog
     assert 'to: "docs/beta_35/kakaya-to-stranica.md"' in links_catalog
 
@@ -74,4 +77,16 @@ def test_index_page_assets_stay_beside_index_file() -> None:
     assert (
         _relative_asset_path(Asset(asset.source, asset.kind, local_path=local_path), page_relpath)
         == f"./{PurePosixPath(local_path).name}"
+    )
+
+
+def test_writer_separates_media_tags_with_blank_lines() -> None:
+    markdown = "Before.\n<video path=\"./demo.mp4\"/>\nAfter.\n<image src=\"./demo.png\"/>\nDone."
+
+    assert _normalize_media_spacing(markdown) == (
+        "Before.\n\n"
+        "<video path=\"./demo.mp4\"/>\n\n"
+        "After.\n\n"
+        "<image src=\"./demo.png\"/>\n\n"
+        "Done."
     )

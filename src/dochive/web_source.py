@@ -163,8 +163,8 @@ async def _crawl_web_async(config: MirrorConfig) -> list[Page]:
                     markdown=markdown,
                     depth=depth,
                     parent_url=parent_url,
-                    links_internal=sorted(set(internal)),
-                    links_external=sorted(set(external)),
+                    links_internal=_unique(internal),
+                    links_external=_unique(external),
                     assets=assets,
                     status_code=getattr(result, "status_code", 200) or 200,
                 )
@@ -187,6 +187,10 @@ def _validate_anti_bot_mode(mode: str) -> None:
             "Use `--anti-bot basic` until proxies and fallback providers are configured."
         )
     raise RuntimeError(f"Unsupported anti-bot mode: {mode}")
+
+
+def _unique(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
 
 
 def _allowed_prefixes(root_url: str, config: MirrorConfig) -> tuple[str, ...]:

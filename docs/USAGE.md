@@ -140,7 +140,7 @@ docs/sd/nsdpro/content/change_list/beta_35/kakaya-to-stranica.md
 docs/sd/nsdpro/content/change_list/change_list_arch.md
 ```
 
-Internal Markdown links, page frontmatter, `_catalog/*.yaml`, sync reports, and folder `_index.yaml` files all use the final `_index.md` paths.
+Internal Markdown links, page frontmatter, `_catalog/*.yaml`, sync reports, and folder `_index.yaml` files all use the final `_index.md` paths. Page frontmatter also receives `order` based on the source navigation order, so Gramax can sort sibling pages the same way as the original documentation.
 
 Use `--save-assets images` when screenshots must be copied locally and Markdown image links must point to page-local media, such as `./example.png` from a Gramax `_index.md` page.
 
