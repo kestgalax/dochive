@@ -15,3 +15,6 @@ mirror-gramax-test/
 mirror/
 tmp*/
 /tests
+!/tests/
+/tests/*
+!/tests/test_writer_gramax_layout.py

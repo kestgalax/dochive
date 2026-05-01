@@ -122,7 +122,27 @@ dochive mirror `
 
 Use `--scope subtree` for a controlled crawl. Use `--scope domain` only when you intentionally want the whole domain to be eligible.
 
-Use `--save-assets images` when screenshots must be copied locally and Markdown image links must point to the page-local media folder, such as `./beta_35/example.png`.
+## Output Layout
+
+Dochive writes nested pages in the layout expected by Gramax. When a crawled page has child pages, the page becomes a folder and the original page content is written to `_index.md`; pages without children stay as regular Markdown files.
+
+Before child pages are known, a page path would look flat:
+
+```text
+docs/sd/nsdpro/content/change_list/beta_35.md
+```
+
+With crawled children, the generated mirror becomes:
+
+```text
+docs/sd/nsdpro/content/change_list/beta_35/_index.md
+docs/sd/nsdpro/content/change_list/beta_35/kakaya-to-stranica.md
+docs/sd/nsdpro/content/change_list/change_list_arch.md
+```
+
+Internal Markdown links, page frontmatter, `_catalog/*.yaml`, sync reports, and folder `_index.yaml` files all use the final `_index.md` paths.
+
+Use `--save-assets images` when screenshots must be copied locally and Markdown image links must point to page-local media, such as `./example.png` from a Gramax `_index.md` page.
 
 ## Anti-Bot Modes
 
@@ -148,10 +168,10 @@ These reserved modes are accepted by the CLI choices, but intentionally stop wit
 By default, linked screenshots are written in Gramax image form:
 
 ```html
-<image src="./beta_35/example.png" crop="0,0,100,100" scale="100" width="1427px" height="617px" float="center"/>
+<image src="./example.png" crop="0,0,100,100" scale="100" width="1427px" height="617px" float="center"/>
 ```
 
-The default `--image-size-mode intrinsic` reads the real downloaded image dimensions and writes them into the Gramax image tag. Saved media is stored next to the Markdown page in a folder named after that page, for example `beta_35.md` uses `beta_35/`.
+The default `--image-size-mode intrinsic` reads the real downloaded image dimensions and writes them into the Gramax image tag. Saved media is stored next to the Markdown page: regular `beta_35.md` pages use `beta_35/`, while Gramax head pages use the same folder as `beta_35/_index.md`.
 
 For wide screenshots, cap rendered width while preserving aspect ratio:
 
@@ -162,7 +182,7 @@ For wide screenshots, cap rendered width while preserving aspect ratio:
 This emits responsive HTML like:
 
 ```html
-<image src="./beta_35/example.png" crop="0,0,100,100" scale="63" width="900px" height="389px" float="center"/>
+<image src="./example.png" crop="0,0,100,100" scale="63" width="900px" height="389px" float="center"/>
 ```
 
 Disable image size attributes only for diagnostics:

@@ -32,8 +32,8 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     catalog_dir.mkdir(exist_ok=True)
     previous_hashes = _read_previous_hashes(catalog_dir / "pages.yaml")
 
-    path_by_url = _build_path_mapping(pages, config)
     child_urls_by_parent = _build_child_mapping(pages)
+    path_by_url = _build_path_mapping(pages, config, child_urls_by_parent)
     now = datetime.now(timezone.utc).isoformat()
     written_pages: list[dict[str, object]] = []
     written_links: list[dict[str, object]] = []
@@ -253,9 +253,14 @@ def _page_catalog_entry(page: Page, relpath: PurePosixPath, frontmatter: dict[st
     }
 
 
-def _build_path_mapping(pages: list[Page], config: MirrorConfig) -> dict[str, PurePosixPath]:
+def _build_path_mapping(
+    pages: list[Page],
+    config: MirrorConfig,
+    child_urls_by_parent: dict[str, list[str]],
+) -> dict[str, PurePosixPath]:
     if is_url(config.source):
-        return {page.canonical_url: url_to_markdown_relpath(page.canonical_url) for page in pages}
+        mapping = {page.canonical_url: url_to_markdown_relpath(page.canonical_url) for page in pages}
+        return _apply_gramax_layout(pages, mapping, child_urls_by_parent)
 
     source_path = Path(config.source).resolve()
     root_dir = source_path.parent if source_path.is_file() else source_path
@@ -269,7 +274,55 @@ def _build_path_mapping(pages: list[Page], config: MirrorConfig) -> dict[str, Pu
         except ValueError:
             rel = Path(page.source_path.name)
         mapping[page.canonical_url] = _local_html_relpath(rel)
-    return mapping
+    return _apply_gramax_layout(pages, mapping, child_urls_by_parent)
+
+
+def _apply_gramax_layout(
+    pages: list[Page],
+    mapping: dict[str, PurePosixPath],
+    child_urls_by_parent: dict[str, list[str]],
+) -> dict[str, PurePosixPath]:
+    final_mapping = dict(mapping)
+    parents_with_children = set(child_urls_by_parent)
+
+    for parent_url in parents_with_children:
+        if parent_url in final_mapping:
+            final_mapping[parent_url] = _page_index_path(final_mapping[parent_url])
+
+    for page in pages:
+        if page.parent_url not in parents_with_children or page.parent_url not in final_mapping:
+            continue
+        current = final_mapping[page.canonical_url]
+        parent_dir = final_mapping[page.parent_url].parent
+        if _is_relative_to(current, parent_dir):
+            continue
+        final_mapping[page.canonical_url] = _move_page_under_folder(current, parent_dir)
+
+    return final_mapping
+
+
+def _page_index_path(path: PurePosixPath) -> PurePosixPath:
+    if path.name == "_index.md":
+        return path
+    if path.suffix.lower() == ".md":
+        return path.parent / path.stem / "_index.md"
+    return path / "_index.md"
+
+
+def _move_page_under_folder(path: PurePosixPath, folder: PurePosixPath) -> PurePosixPath:
+    if path.name == "_index.md":
+        return folder / path.parent.name / "_index.md"
+    return folder / path.name
+
+
+def _is_relative_to(path: PurePosixPath, parent: PurePosixPath) -> bool:
+    if path == parent:
+        return True
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
 
 
 def _build_child_mapping(pages: list[Page]) -> dict[str, list[str]]:
@@ -662,7 +715,9 @@ def _asset_relpath(asset: Asset, page_relpath: PurePosixPath) -> Path:
     name = Path(unquote(parsed.path)).name or f"{short_hash(asset.source)}.bin"
     stem = Path(name).stem or short_hash(asset.source)
     suffix = Path(name).suffix or ".bin"
-    page_asset_dir = Path(*page_relpath.parent.parts) / page_relpath.stem
+    page_asset_dir = Path(*page_relpath.parent.parts)
+    if page_relpath.name != "_index.md":
+        page_asset_dir = page_asset_dir / page_relpath.stem
     return page_asset_dir / f"{stem}-{short_hash(asset.source)}{suffix}"
 
 
