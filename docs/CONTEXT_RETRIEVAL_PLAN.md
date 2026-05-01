@@ -1,0 +1,261 @@
+# Context Retrieval Plan
+
+## Intent
+
+Build an OpenViking-inspired context layer around the documentation mirror without making vector search a requirement. The mirror should remain Git-friendly, observable, and deterministic, while still leaving room for optional LLM-assisted retrieval when keyword and structural search are not enough.
+
+## Inspiration From OpenViking
+
+OpenViking's useful principles for this project are architectural rather than strictly vector-specific:
+
+- Filesystem paradigm: context is organized as files, folders, and stable resource identifiers.
+- Tiered context loading: use lightweight abstracts first, richer overviews second, and full content only when needed.
+- Directory recursive retrieval: locate relevant directories before pages, then relevant sections inside pages.
+- Observable retrieval trajectory: expose why each directory, page, or section was selected.
+- Context resources: treat pages, assets, links, catalogs, and diagnostics as addressable context.
+
+The mirror already has a strong filesystem base:
+
+- Markdown pages as full content.
+- `_index.yaml` files as directory structure.
+- `_catalog/pages.yaml`, `links.yaml`, `assets.yaml`, `errors.yaml`, and `sync.yaml` as global indexes.
+- `_assets/` as localized resource storage.
+
+## Proposed Context Levels
+
+### L0 Abstract
+
+Small summaries used for cheap routing.
+
+Examples:
+
+- One-line page abstract in frontmatter or `context_index.jsonl`.
+- Directory abstract generated from child page titles and summaries.
+- Site-level summary in `_catalog/summary.yaml`.
+
+### L1 Overview
+
+Structured but compact context.
+
+Examples:
+
+- Heading tree for a page.
+- Table/image/link counts.
+- Key terms and aliases.
+- First-level directory overview.
+- Section list with short snippets.
+
+### L2 Details
+
+Full source content.
+
+Examples:
+
+- Complete Markdown page.
+- Full section body.
+- Localized image path and surrounding text.
+- Full catalog entry.
+
+## Proposed Files
+
+Start with one generated index:
+
+```text
+_catalog/context_index.jsonl
+```
+
+Possible future sidecars:
+
+```text
+_catalog/retrieval_trace.jsonl
+_catalog/aliases.yaml
+```
+
+Avoid creating many sidecar files per page until the JSONL format proves insufficient.
+
+## Context Unit Schema
+
+Draft `context_index.jsonl` record:
+
+```json
+{
+  "uri": "mirror://www.naumen.ru/docs/sd/nsdpro/content/admin_n/deployment_schemes.md#типовая-конфигурация-от-500-до-1000",
+  "kind": "section",
+  "level": "L2",
+  "path": "docs/sd/nsdpro/content/admin_n/deployment_schemes.md",
+  "source_url": "https://www.naumen.ru/docs/sd/nsdpro/Content/admin_n/deployment_schemes.htm",
+  "title": "Типовые схемы развертывания",
+  "headings": [
+    "Типовые схемы развертывания",
+    "Типовые наборы компонентов систем на базе SD Pro",
+    "Типовая конфигурация от 500 до 1000 одновременных пользователей (sd_pro_medium)"
+  ],
+  "abstract": "Состав компонентов SD Pro для нагрузки 500-1000 пользователей.",
+  "text": "...",
+  "terms": ["sd", "pro", "backend", "frontend", "500", "1000", "rdbms"],
+  "links": [],
+  "assets": ["_assets/images/003.png"],
+  "content_hash": "sha256:..."
+}
+```
+
+## Retrieval Without Vectors
+
+### Baseline Search
+
+Use deterministic scoring first:
+
+- BM25 or TF-IDF-style term scoring.
+- Exact phrase boosts.
+- Heading and title boosts.
+- Table and list boosts.
+- Number and acronym boosts.
+- Path and directory boosts.
+- Alias expansion from a curated dictionary.
+
+Example alias entries:
+
+```yaml
+субд:
+  - rdbms
+  - database
+  - база данных
+балансировщик:
+  - load balancer
+  - reverse proxy
+  - nginx
+очередь:
+  - broker
+  - message broker
+  - mq
+  - artemis
+```
+
+### Directory Recursive Retrieval
+
+Search should not be a flat scan only.
+
+Proposed flow:
+
+1. Score directory abstracts and overviews.
+2. Select candidate directories.
+3. Score pages inside candidate directories.
+4. Score sections/chunks inside candidate pages.
+5. Optionally expand to sibling directories if confidence is low.
+6. Return selected context units with trace.
+
+### Trace
+
+Each retrieval result should explain itself:
+
+```json
+{
+  "uri": "mirror://...",
+  "score": 42.5,
+  "why": [
+    "matched heading: Типовая конфигурация от 500 до 1000...",
+    "matched terms: 500, 1000, SD Pro Backend",
+    "matched table rows: SD Pro Backend, RDBMS Slave"
+  ]
+}
+```
+
+This keeps the retrieval chain inspectable by humans and by downstream LLM agents.
+
+## Optional LLM-Assisted Retrieval
+
+The project should not categorically exclude LLM-based search. A hybrid design can be useful, especially for Russian documentation, domain synonyms, and queries that do not share vocabulary with the source text.
+
+The baseline should remain deterministic, but an optional local or low-cost LLM can help with:
+
+- Query expansion.
+- Intent classification.
+- Candidate directory selection.
+- Candidate chunk reranking.
+- Detecting weak or irrelevant lexical matches.
+- Producing a search plan before retrieval.
+
+Recommended flow:
+
+1. Deterministic retrieval returns broad candidates.
+2. Optional helper model reranks or filters candidates.
+3. Final answer model receives the chosen context and retrieval trace.
+4. Output includes both deterministic scores and helper-model decisions.
+
+This gives double-checking without making retrieval entirely opaque.
+
+Open question:
+
+- Should the helper model run before lexical retrieval as a query planner, after retrieval as a reranker, or both?
+
+Likely first implementation:
+
+- Start with reranking only. It is safer because the helper model cannot hide relevant material that deterministic retrieval never collected.
+
+## Image Handling
+
+The mirror pipeline should not require a VLM during crawl or index generation.
+
+Default behavior:
+
+- Localize images.
+- Preserve source URL and local path.
+- Store dimensions.
+- Associate images with the surrounding page and heading.
+- Use `alt` text, filenames, and nearby Markdown as searchable text.
+
+Optional behavior:
+
+- A multimodal model may be used at answer time or through an explicit enrichment command.
+- Generated image descriptions should be stored as auditable sidecar context only when requested.
+- The provenance of image descriptions must remain clear.
+
+Open question:
+
+- Should image interpretation be an `enrich-images` command, an on-demand `ask` behavior, or both?
+
+Likely first implementation:
+
+- Keep image interpretation out of `mirror` and `index`.
+- Add on-demand multimodal interpretation later, scoped to images selected by retrieval.
+
+## Proposed Commands
+
+```powershell
+dochive index --root .\mirror\www.naumen.ru
+dochive retrieve --root .\mirror\www.naumen.ru --text "какая схема для 700 пользователей" --format json --trace
+dochive ask --root .\mirror\www.naumen.ru --text "какая схема для 700 пользователей"
+```
+
+Optional later:
+
+```powershell
+dochive retrieve --root .\mirror\www.naumen.ru --text "..." --llm-rerank
+dochive enrich-images --root .\mirror\www.naumen.ru --scope selected
+```
+
+## TUI Position
+
+TUI is valuable after the context layer stabilizes.
+
+Best TUI surfaces:
+
+- Browse mirror tree.
+- Inspect `_catalog/errors.yaml`.
+- Preview `context_index.jsonl`.
+- Run retrieval queries.
+- View retrieval trace.
+- Compare deterministic and LLM-assisted retrieval.
+
+The TUI should remain a client of stable CLI commands, not the place where retrieval logic is first implemented.
+
+## Recommended Implementation Order
+
+1. Build `context_index.jsonl` from Markdown and catalogs.
+2. Add heading-aware section chunking.
+3. Add deterministic `retrieve --format json --trace`.
+4. Add alias expansion and structural scoring.
+5. Add an evaluation set of representative questions.
+6. Add optional LLM reranking.
+7. Add optional multimodal image interpretation.
+8. Add TUI for browsing, diagnostics, and retrieval trace inspection.

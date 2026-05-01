@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+mirror-test/
+mirror-test-no-assets/
+mirror-sync*/
+mirror-media-test/
+mirror-gramax-test/
+.crawl4ai-data/
+.playwright-browsers/
+mirror/
+tmp*/
