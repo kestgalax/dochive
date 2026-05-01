@@ -346,35 +346,44 @@ def _heading_level_from_class(attrs_map: dict[str, str]) -> int | None:
 
 def _insert_missing_markdown_headings(lines: list[str], headings: list[HtmlHeading]) -> list[str]:
     output = list(lines)
-    present = _present_markdown_heading_texts(output)
+    search_start = 0
     for heading in headings:
         normalized = _normalize_heading_text(repair_mojibake(heading.text))
-        if not normalized or normalized in present:
+        if not normalized:
             continue
-        insertion_index = _heading_insertion_index(output, heading)
-        if insertion_index is None:
+
+        insertion_match = _heading_insertion_match(output, heading, search_start)
+        existing_index = _find_markdown_heading(output, normalized, search_start)
+        if existing_index is not None and (
+            insertion_match is None or existing_index <= insertion_match[1]
+        ):
+            search_start = insertion_match[1] + 1 if insertion_match is not None else existing_index + 1
             continue
+
+        if insertion_match is None:
+            continue
+        insertion_index, anchor_index = insertion_match
         output.insert(insertion_index, f"{'#' * heading.level} {normalized}")
-        present.add(normalized)
+        search_start = anchor_index + 2
     return output
 
 
-def _present_markdown_heading_texts(lines: list[str]) -> set[str]:
-    present: set[str] = set()
-    for line in lines:
+def _find_markdown_heading(lines: list[str], text: str, start_index: int) -> int | None:
+    for index, line in enumerate(lines[start_index:], start=start_index):
         if match := _MARKDOWN_HEADING_PARSE_RE.match(line):
-            present.add(_normalize_heading_text(repair_mojibake(match.group(1))))
-    return present
+            if _normalize_heading_text(repair_mojibake(match.group(1))) == text:
+                return index
+    return None
 
 
-def _heading_insertion_index(lines: list[str], heading: HtmlHeading) -> int | None:
+def _heading_insertion_match(lines: list[str], heading: HtmlHeading, start_index: int = 0) -> tuple[int, int] | None:
     for anchor in heading.anchors:
         normalized_anchor = _normalize_heading_text(repair_mojibake(anchor))
         if not normalized_anchor:
             continue
-        for index, line in enumerate(lines):
+        for index, line in enumerate(lines[start_index:], start=start_index):
             if _line_contains_anchor(line, normalized_anchor):
-                return _previous_block_start(lines, index)
+                return _previous_block_start(lines, index), index
     return None
 
 
@@ -384,8 +393,6 @@ def _line_contains_anchor(line: str, anchor: str) -> bool:
 
 
 def _previous_block_start(lines: list[str], index: int) -> int:
-    while index > 0 and not lines[index - 1].strip():
-        index -= 1
     return index
 
 

@@ -14,3 +14,4 @@ mirror-gramax-test/
 .playwright-browsers/
 mirror/
 tmp*/
+/tests
