@@ -248,6 +248,13 @@ def extract_html_headings(html: str) -> list[HtmlHeading]:
     return parser.headings
 
 
+def extract_html_anchor_headings(html: str) -> dict[str, str]:
+    parser = _HtmlAnchorHeadingParser()
+    parser.feed(html)
+    parser.close()
+    return parser.anchor_headings
+
+
 def promote_markdown_headings(markdown: str, html: str) -> str:
     """Restore Markdown heading markers from source HTML when an extractor drops them."""
 
@@ -337,6 +344,79 @@ class _HtmlHeadingParser(HTMLParser):
 
     def handle_charref(self, name: str) -> None:
         self.handle_data(unescape(f"&#{name};"))
+
+
+class _HtmlAnchorHeadingParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.anchor_headings: dict[str, str] = {}
+        self._skip_depth = 0
+        self._pending_anchors: list[str] = []
+        self._active_heading: tuple[int, list[str], list[str]] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attrs_map = {key.lower(): value or "" for key, value in attrs}
+        if tag in {"script", "style", "noscript", "svg"}:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+
+        if tag == "a" and not attrs_map.get("href"):
+            self._remember_anchor(attrs_map.get("name", ""))
+            self._remember_anchor(attrs_map.get("id", ""))
+
+        if self._active_heading is not None:
+            depth, parts, anchors = self._active_heading
+            self._active_heading = (depth + 1, parts, anchors)
+            return
+
+        is_heading = tag in {"h1", "h2", "h3", "h4", "h5", "h6"} or (
+            tag in {"p", "div"} and _heading_level_from_class(attrs_map)
+        )
+        if is_heading:
+            anchors = list(self._pending_anchors)
+            self._pending_anchors = []
+            if heading_id := attrs_map.get("id", ""):
+                anchors.append(heading_id)
+            self._active_heading = (1, [], anchors)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style", "noscript", "svg"} and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if self._skip_depth or self._active_heading is None:
+            return
+
+        depth, parts, anchors = self._active_heading
+        depth -= 1
+        if depth:
+            self._active_heading = (depth, parts, anchors)
+            return
+
+        heading = _normalize_heading_text(repair_mojibake("".join(parts)))
+        if heading:
+            for anchor in anchors:
+                if anchor and anchor not in self.anchor_headings:
+                    self.anchor_headings[anchor] = heading
+        self._active_heading = None
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        if self._active_heading is not None:
+            self._active_heading[1].append(data)
+
+    def handle_entityref(self, name: str) -> None:
+        self.handle_data(unescape(f"&{name};"))
+
+    def handle_charref(self, name: str) -> None:
+        self.handle_data(unescape(f"&#{name};"))
+
+    def _remember_anchor(self, value: str) -> None:
+        value = value.strip()
+        if value and value not in self._pending_anchors:
+            self._pending_anchors.append(value)
 
 
 def _heading_level_from_class(attrs_map: dict[str, str]) -> int | None:

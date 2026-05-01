@@ -6,6 +6,11 @@ from .text_utils import repair_mojibake
 
 _COPY_CODE_CONTROL_RE = re.compile(r"^(?:\[(?:copy|copy code)\]\([^)]+\)|(?:copy|copy code))$", re.IGNORECASE)
 _FENCED_CODE_RE = re.compile(r"^\s*(```|~~~)")
+_RAW_HTML_EXAMPLE_RE = re.compile(
+    r"^</?(?:a|br|h[1-6]|strong|em|p|div|span)\b[^>]*>(?:[^<]*</(?:a|h[1-6]|strong|em|p|div|span)>)?$",
+    re.IGNORECASE,
+)
+_NEXT_LINK_RE = re.compile(r"^\s*(?:\\?\*\\?\*)?\s*Далее\s*>>", re.IGNORECASE)
 
 
 DEFAULT_NOISE_LINES = {
@@ -23,7 +28,10 @@ DEFAULT_NOISE_LINES = {
 def normalize_markdown(markdown: str, *, clean: bool = True, extra_noise_lines: tuple[str, ...] = ()) -> str:
     text = repair_mojibake(markdown)
     text = _normalize_nbsp(text)
+    text = _fence_raw_html_examples(text)
     text = _drop_code_copy_controls(text)
+    text = _drop_next_page_links(text)
+    text = _normalize_media_spacing(text)
     text = _normalize_blank_lines(text)
     if clean:
         text = _drop_noise_lines(text, DEFAULT_NOISE_LINES | set(extra_noise_lines))
@@ -53,6 +61,51 @@ def _normalize_blank_lines(text: str) -> str:
     return "\n".join(compact).strip()
 
 
+def _fence_raw_html_examples(text: str) -> str:
+    lines = text.splitlines()
+    output: list[str] = []
+    index = 0
+    in_fence = False
+    while index < len(lines):
+        if _FENCED_CODE_RE.match(lines[index]):
+            in_fence = not in_fence
+            output.append(lines[index])
+            index += 1
+            continue
+        if in_fence:
+            output.append(lines[index])
+            index += 1
+            continue
+        if _is_raw_html_example_line(lines[index]):
+            block: list[str] = []
+            while index < len(lines) and (_is_raw_html_example_line(lines[index]) or not lines[index].strip()):
+                block.append(lines[index])
+                index += 1
+            if sum(1 for line in block if _is_raw_html_example_line(line)) >= 2:
+                while block and not block[-1].strip():
+                    block.pop()
+                if output and output[-1].strip():
+                    output.append("")
+                output.append("```html")
+                output.extend(block)
+                output.append("```")
+                continue
+            output.extend(block)
+            continue
+        output.append(lines[index])
+        index += 1
+    return "\n".join(output)
+
+
+def _is_raw_html_example_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if stripped.lower().startswith(("<image ", "<video ", "<source ")):
+        return False
+    return bool(_RAW_HTML_EXAMPLE_RE.match(stripped))
+
+
 def _drop_code_copy_controls(text: str) -> str:
     lines = text.splitlines()
     output: list[str] = []
@@ -61,6 +114,44 @@ def _drop_code_copy_controls(text: str) -> str:
             continue
         output.append(line)
     return "\n".join(output)
+
+
+def _drop_next_page_links(text: str) -> str:
+    output: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        if _FENCED_CODE_RE.match(line):
+            in_fence = not in_fence
+        if not in_fence and _NEXT_LINK_RE.match(_line_text(line)):
+            continue
+        output.append(line)
+    return "\n".join(output)
+
+
+def _normalize_media_spacing(text: str) -> str:
+    output: list[str] = []
+    lines = text.splitlines()
+    in_fence = False
+    for index, line in enumerate(lines):
+        if _FENCED_CODE_RE.match(line):
+            in_fence = not in_fence
+            output.append(line)
+            continue
+        if not in_fence and _is_media_line(line):
+            if output and output[-1].strip():
+                output.append("")
+            output.append(line.strip())
+            next_line = lines[index + 1] if index + 1 < len(lines) else ""
+            if next_line.strip():
+                output.append("")
+            continue
+        output.append(line)
+    return "\n".join(output)
+
+
+def _is_media_line(line: str) -> bool:
+    stripped = line.strip().lower()
+    return stripped.startswith(("<image ", "<video "))
 
 
 def _looks_like_copy_code_control(line: str) -> bool:

@@ -6,7 +6,7 @@ from collections import deque
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .html_extract import extract_html_videos, inject_html_videos, promote_markdown_headings
+from .html_extract import extract_html_anchor_headings, extract_html_videos, inject_html_videos, promote_markdown_headings
 from .markdown_normalizer import normalize_markdown
 from .media_utils import extract_markdown_assets, merge_assets
 from .models import Asset, MirrorConfig, MirrorIssue, MirrorRun, Page
@@ -163,8 +163,9 @@ async def _crawl_web_async(config: MirrorConfig) -> list[Page]:
                     markdown=markdown,
                     depth=depth,
                     parent_url=parent_url,
-                    links_internal=sorted(set(internal)),
-                    links_external=sorted(set(external)),
+                    links_internal=_unique(internal),
+                    links_external=_unique(external),
+                    anchor_headings=extract_html_anchor_headings(html) if html else {},
                     assets=assets,
                     status_code=getattr(result, "status_code", 200) or 200,
                 )
@@ -187,6 +188,10 @@ def _validate_anti_bot_mode(mode: str) -> None:
             "Use `--anti-bot basic` until proxies and fallback providers are configured."
         )
     raise RuntimeError(f"Unsupported anti-bot mode: {mode}")
+
+
+def _unique(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
 
 
 def _allowed_prefixes(root_url: str, config: MirrorConfig) -> tuple[str, ...]:

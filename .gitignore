@@ -14,4 +14,5 @@ mirror-gramax-test/
 .playwright-browsers/
 mirror/
 tmp*/
-/tests
+/tests/*
+!/tests/test_crawl_limits.py

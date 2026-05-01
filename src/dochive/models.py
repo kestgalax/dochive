@@ -27,6 +27,7 @@ class Page:
     parent_url: str | None = None
     links_internal: list[str] = field(default_factory=list)
     links_external: list[str] = field(default_factory=list)
+    anchor_headings: dict[str, str] = field(default_factory=dict)
     assets: list[Asset] = field(default_factory=list)
     source_path: Path | None = None
 
