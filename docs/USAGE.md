@@ -122,7 +122,7 @@ dochive mirror `
 
 Use `--scope subtree` for a controlled crawl. Use `--scope domain` only when you intentionally want the whole domain to be eligible.
 
-Use `--save-assets images` when screenshots must be copied locally and Markdown image links must point to `_assets/images/...`.
+Use `--save-assets images` when screenshots must be copied locally and Markdown image links must point to the page-local media folder, such as `./beta_35/example.png`.
 
 ## Anti-Bot Modes
 
@@ -145,13 +145,13 @@ Reserved modes:
 
 These reserved modes are accepted by the CLI choices, but intentionally stop with a clear error until the required runtime configuration is implemented. Aggressive mode will need a proxy list, probably through `--proxy` and/or a `DOCHIVE_PROXIES` environment variable, plus an optional fallback fetch provider for sites that block all browser attempts.
 
-By default, linked screenshots are written in a Gramax-friendly HTML form:
+By default, linked screenshots are written in Gramax image form:
 
 ```html
-<img src="../../../../../_assets/images/example.png" alt="" width="1427" height="617" />
+<image src="./beta_35/example.png" crop="0,0,100,100" scale="100" width="1427px" height="617px" float="center"/>
 ```
 
-The default `--image-size-mode intrinsic` reads the real downloaded image dimensions and writes them into the HTML tag.
+The default `--image-size-mode intrinsic` reads the real downloaded image dimensions and writes them into the Gramax image tag. Saved media is stored next to the Markdown page in a folder named after that page, for example `beta_35.md` uses `beta_35/`.
 
 For wide screenshots, cap rendered width while preserving aspect ratio:
 
@@ -162,7 +162,7 @@ For wide screenshots, cap rendered width while preserving aspect ratio:
 This emits responsive HTML like:
 
 ```html
-<img src="../../../../../_assets/images/example.png" alt="" width="900" height="389" style="max-width: 100%; height: auto;" />
+<image src="./beta_35/example.png" crop="0,0,100,100" scale="63" width="900px" height="389px" float="center"/>
 ```
 
 Disable image size attributes only for diagnostics:
@@ -185,13 +185,13 @@ Use `--image-link-mode linked` only when you explicitly need standard Markdown l
 
 ## Mirror Videos
 
-HTML `<video>` blocks are preserved in Markdown as playable HTML:
+HTML `<video>` blocks are preserved in Markdown as Gramax video tags:
 
 ```html
-<video controls src="../../../../../_assets/videos/example.mp4"></video>
+<video path="./change_list_30_video/example.mp4"/>
 ```
 
-Without asset saving, video tags keep the original remote URL. To copy MP4 files into the mirror and rewrite video `src` attributes to `_assets/videos/...`, include `videos` in `--save-assets`:
+Without asset saving, video tags keep the original remote URL. To copy MP4 files into the mirror and rewrite video `path` attributes to the page-local media folder, include `videos` in `--save-assets`:
 
 ```powershell
 dochive mirror `

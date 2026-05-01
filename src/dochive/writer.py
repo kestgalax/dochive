@@ -13,12 +13,16 @@ from urllib.request import url2pathname, urlretrieve
 from .html_extract import is_local_file_reference
 from .image_size import read_image_size
 from .models import Asset, MirrorConfig, MirrorIssue, Page
-from .url_utils import is_url, short_hash, source_root_name, url_to_markdown_relpath
+from .url_utils import canonicalize_url, is_url, short_hash, source_root_name, url_to_markdown_relpath
 from .yaml_writer import dumps_yaml
 
 LINK_RE = re.compile(r"(!?\[[^\]]*\]\()([^)]+)(\))")
 NESTED_IMAGE_LINK_RE = re.compile(r"\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)")
-HTML_MEDIA_SRC_RE = re.compile(r"(<(?:video|source)\b[^>]*\bsrc=[\"'])([^\"']+)([\"'][^>]*>)", re.IGNORECASE)
+IMAGE_TEXT_LINK_RE = re.compile(r"\[!\[[^\]]*\]\([^)]+\)([^\]]+)\]\(([^)]+)\)")
+HTML_MEDIA_URL_RE = re.compile(
+    r"(<(?:video|source)\b[^>]*\b(?:path|src)=[\"'])([^\"']+)([\"'][^>]*>)",
+    re.IGNORECASE,
+)
 
 
 def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[MirrorIssue] | None = None) -> Path:
@@ -348,6 +352,7 @@ def _rewrite_markdown_links(
     config: MirrorConfig,
 ) -> str:
     asset_by_source = {asset.source: asset for asset in assets if asset.local_path}
+    markdown = IMAGE_TEXT_LINK_RE.sub(lambda match: f"[{match.group(1).strip()}]({match.group(2).strip()})", markdown)
 
     if config.image_link_mode == "plain":
         markdown = NESTED_IMAGE_LINK_RE.sub(
@@ -373,7 +378,68 @@ def _rewrite_markdown_links(
         return _rewrite_single_target(match, page, current_relpath, path_by_url, asset_by_source)
 
     markdown = LINK_RE.sub(replace, markdown)
-    return _rewrite_html_media_sources(markdown, page, current_relpath, path_by_url, asset_by_source)
+    markdown = _rewrite_html_media_sources(markdown, page, current_relpath, path_by_url, asset_by_source)
+    return _render_details_sections(markdown)
+
+
+def _render_details_sections(markdown: str) -> str:
+    lines = markdown.splitlines()
+    output: list[str] = []
+    details_open = False
+
+    for line in lines:
+        summary = _details_summary_text(line)
+        if summary:
+            if details_open:
+                output.append("")
+                output.append("</details>")
+                output.append("")
+            elif output and output[-1].strip():
+                output.append("")
+            output.append("<details>")
+            output.append("")
+            output.append(f"<summary>{summary}</summary>")
+            output.append("")
+            details_open = True
+            continue
+
+        if details_open and _details_boundary_line(line):
+            output.append("")
+            output.append("</details>")
+            output.append("")
+            details_open = False
+
+        if details_open:
+            line = _normalize_details_line(line)
+        output.append(line)
+
+    if details_open:
+        output.append("")
+        output.append("</details>")
+
+    return "\n".join(output) + ("\n" if markdown.endswith("\n") else "")
+
+
+def _details_summary_text(line: str) -> str | None:
+    match = re.fullmatch(r"\[(Подробное описание|Подробнее)\]\([^)]+\)", line.strip(), re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def _details_boundary_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    leading_spaces = len(line) - len(line.lstrip(" "))
+    return bool(
+        re.match(r"#{1,6}\s+\S", stripped)
+        or (leading_spaces <= 2 and re.match(r"[*-]\s+\S", stripped))
+    )
+
+
+def _normalize_details_line(line: str) -> str:
+    if match := re.fullmatch(r"\s*\*\*(.+?)\*\*\s*", line):
+        return f"##### {match.group(1).strip()}"
+    return re.sub(r"^ {4,}([*-]\s+\S)", r"  \1", line)
 
 
 def _rewrite_html_media_sources(
@@ -387,7 +453,7 @@ def _rewrite_html_media_sources(
         rewritten = _rewrite_target_text(match.group(2).strip(), page, current_relpath, path_by_url, asset_by_source)
         return match.group(1) + rewritten + match.group(3)
 
-    return HTML_MEDIA_SRC_RE.sub(replace, markdown)
+    return HTML_MEDIA_URL_RE.sub(replace, markdown)
 
 
 def _nested_image_to_plain(
@@ -413,8 +479,7 @@ def _image_alt_from_prefix(prefix: str) -> str:
 
 def _render_image(path: str, alt: str, asset: Asset, config: MirrorConfig) -> str:
     if config.image_render_mode == "html":
-        escaped_alt = alt.replace('"', "&quot;")
-        return f'\n\n<img src="{path}" alt="{escaped_alt}"{_image_size_attrs(asset, config)} />\n\n'
+        return f'\n\n<image src="{path}"{_image_size_attrs(asset, config)} float="center"/>\n\n'
     return f"![{alt}]({path})"
 
 
@@ -422,16 +487,17 @@ def _image_size_attrs(asset: Asset, config: MirrorConfig) -> str:
     if config.image_size_mode == "none" or not asset.width or not asset.height:
         return ""
 
+    original_width = asset.width
     width = asset.width
     height = asset.height
-    style = ""
+    scale = 100
     if config.image_size_mode == "max-width" and config.image_max_width and width > config.image_max_width:
-        scale = config.image_max_width / width
+        ratio = config.image_max_width / width
         width = config.image_max_width
-        height = max(1, round(height * scale))
-        style = ' style="max-width: 100%; height: auto;"'
+        height = max(1, round(height * ratio))
+        scale = max(1, round((width / original_width) * 100))
 
-    return f' width="{width}" height="{height}"{style}'
+    return f' crop="0,0,100,100" scale="{scale}" width="{width}px" height="{height}px"'
 
 
 def _nested_image_to_linked(
@@ -503,10 +569,13 @@ def _rewrite_target_text(
 
 def _relative_asset_path(asset: Asset, current_relpath: PurePosixPath) -> str:
     asset_path = PurePosixPath(asset.local_path or "")
-    return os.path.relpath(
+    rel = os.path.relpath(
         Path(*asset_path.parts),
         start=Path(*current_relpath.parent.parts) if str(current_relpath.parent) != "." else Path("."),
     ).replace("\\", "/")
+    if not rel.startswith((".", "/")):
+        return "./" + rel
+    return rel
 
 
 def _normalize_markdown_target(target: str, page: Page) -> str:
@@ -519,6 +588,8 @@ def _normalize_markdown_target(target: str, page: Page) -> str:
         else:
             local = (page.source_path.parent / unquote(parsed.path)).resolve()
         return local.as_uri().rstrip("/")
+    if is_url(page.canonical_url):
+        return canonicalize_url(target, page.canonical_url)
     return target
 
 
@@ -535,7 +606,7 @@ def _materialize_assets(
         if not config.save_asset_kinds or asset.kind not in config.save_asset_kinds:
             materialized.append(asset)
             continue
-        target_rel = _asset_relpath(asset)
+        target_rel = _asset_relpath(asset, page_relpath)
         target = root / target_rel
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -586,12 +657,13 @@ def _asset_with_local_metadata(asset: Asset, local_path: str, file_path: Path) -
     return Asset(asset.source, asset.kind, asset.alt, local_path, width, height)
 
 
-def _asset_relpath(asset: Asset) -> Path:
+def _asset_relpath(asset: Asset, page_relpath: PurePosixPath) -> Path:
     parsed = urlparse(asset.source)
     name = Path(unquote(parsed.path)).name or f"{short_hash(asset.source)}.bin"
     stem = Path(name).stem or short_hash(asset.source)
     suffix = Path(name).suffix or ".bin"
-    return Path("_assets") / asset.kind / f"{stem}-{short_hash(asset.source)}{suffix}"
+    page_asset_dir = Path(*page_relpath.parent.parts) / page_relpath.stem
+    return page_asset_dir / f"{stem}-{short_hash(asset.source)}{suffix}"
 
 
 def _asset_local_path(source: str, base_dir: Path) -> Path:

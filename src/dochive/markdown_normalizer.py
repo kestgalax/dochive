@@ -4,6 +4,9 @@ import re
 
 from .text_utils import repair_mojibake
 
+_COPY_CODE_CONTROL_RE = re.compile(r"^(?:\[(?:copy|copy code)\]\([^)]+\)|(?:copy|copy code))$", re.IGNORECASE)
+_FENCED_CODE_RE = re.compile(r"^\s*(```|~~~)")
+
 
 DEFAULT_NOISE_LINES = {
     "* * *",
@@ -20,6 +23,7 @@ DEFAULT_NOISE_LINES = {
 def normalize_markdown(markdown: str, *, clean: bool = True, extra_noise_lines: tuple[str, ...] = ()) -> str:
     text = repair_mojibake(markdown)
     text = _normalize_nbsp(text)
+    text = _drop_code_copy_controls(text)
     text = _normalize_blank_lines(text)
     if clean:
         text = _drop_noise_lines(text, DEFAULT_NOISE_LINES | set(extra_noise_lines))
@@ -47,6 +51,38 @@ def _normalize_blank_lines(text: str) -> str:
             compact.append(line)
             blank = False
     return "\n".join(compact).strip()
+
+
+def _drop_code_copy_controls(text: str) -> str:
+    lines = text.splitlines()
+    output: list[str] = []
+    for index, line in enumerate(lines):
+        if _looks_like_copy_code_control(line) and _is_adjacent_to_fenced_code(lines, index):
+            continue
+        output.append(line)
+    return "\n".join(output)
+
+
+def _looks_like_copy_code_control(line: str) -> bool:
+    return bool(_COPY_CODE_CONTROL_RE.match(_line_text(line)))
+
+
+def _is_adjacent_to_fenced_code(lines: list[str], index: int) -> bool:
+    previous_index = _nearest_nonblank_index(lines, index, -1)
+    next_index = _nearest_nonblank_index(lines, index, 1)
+    return (
+        (previous_index is not None and _FENCED_CODE_RE.match(lines[previous_index]))
+        or (next_index is not None and _FENCED_CODE_RE.match(lines[next_index]))
+    )
+
+
+def _nearest_nonblank_index(lines: list[str], index: int, step: int) -> int | None:
+    candidate = index + step
+    while 0 <= candidate < len(lines):
+        if lines[candidate].strip():
+            return candidate
+        candidate += step
+    return None
 
 
 def _drop_noise_lines(text: str, noise_lines: set[str]) -> str:

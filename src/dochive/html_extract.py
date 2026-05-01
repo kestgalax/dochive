@@ -200,10 +200,7 @@ def extract_html_videos(html: str, base_url: str) -> list[list[str]]:
 
 
 def _render_video(sources: list[str]) -> str:
-    if len(sources) == 1:
-        return f'<video controls src="{sources[0]}"></video>'
-    source_tags = "\n".join(f'  <source src="{source}">' for source in sources)
-    return f"<video controls>\n{source_tags}\n</video>"
+    return f'<video path="{sources[0]}"/>'
 
 
 def _is_video_fallback_line(line: str) -> bool:

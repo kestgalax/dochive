@@ -82,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--image-render-mode",
         choices=("html", "markdown"),
         default="html",
-        help="How to render plain images. `html` writes <img src=\"...\">; `markdown` writes ![](...).",
+        help="How to render plain images. `html` writes Gramax <image src=\"...\"/>; `markdown` writes ![](...).",
     )
     mirror.add_argument(
         "--image-size-mode",
