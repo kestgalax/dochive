@@ -36,6 +36,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     child_urls_by_parent = _build_child_mapping(pages)
     path_by_url = _build_path_mapping(pages, config, child_urls_by_parent)
     order_by_url = _build_order_mapping(pages)
+    nav_parent_by_url = _nav_parent_by_url(pages)
     anchor_headings_by_url = {page.canonical_url: page.anchor_headings for page in pages}
     now = datetime.now(timezone.utc).isoformat()
     written_pages: list[dict[str, object]] = []
@@ -47,6 +48,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     for page in pages:
         relpath = path_by_url[page.canonical_url]
         output_path = root / Path(*relpath.parts)
+        _remove_stale_page_alternates(root, relpath)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         assets, asset_errors = _materialize_assets(page.assets, page, root, config, relpath)
@@ -66,6 +68,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
             path_by_url,
             child_urls_by_parent,
             order_by_url,
+            nav_parent_by_url,
             assets,
             now,
             content_hash,
@@ -227,12 +230,14 @@ def _page_frontmatter(
     path_by_url: dict[str, PurePosixPath],
     child_urls_by_parent: dict[str, list[str]],
     order_by_url: dict[str, int],
+    nav_parent_by_url: dict[str, str | None],
     assets: list[Asset],
     crawled_at: str,
     content_hash: str,
 ) -> dict[str, object]:
     children = [str(path_by_url[url]) for url in child_urls_by_parent.get(page.canonical_url, []) if url in path_by_url]
-    parent = str(path_by_url[page.parent_url]) if page.parent_url in path_by_url else None
+    nav_parent_url = nav_parent_by_url.get(page.canonical_url)
+    parent = str(path_by_url[nav_parent_url]) if nav_parent_url in path_by_url else None
     internal_links = [str(path_by_url[url]) for url in page.links_internal if url in path_by_url]
     return {
         "source_url": page.source_url,
@@ -307,16 +312,18 @@ def _apply_gramax_layout(
 ) -> dict[str, PurePosixPath]:
     final_mapping = dict(mapping)
     parents_with_children = set(child_urls_by_parent)
+    nav_url_by_path = _nav_url_by_path(pages)
 
     for parent_url in parents_with_children:
         if parent_url in final_mapping:
             final_mapping[parent_url] = _page_index_path(final_mapping[parent_url])
 
     for page in pages:
-        if page.parent_url not in parents_with_children or page.parent_url not in final_mapping:
+        nav_parent_url = _nav_parent_url(page, final_mapping.keys(), nav_url_by_path)
+        if nav_parent_url not in parents_with_children or nav_parent_url not in final_mapping:
             continue
         current = final_mapping[page.canonical_url]
-        parent_dir = final_mapping[page.parent_url].parent
+        parent_dir = final_mapping[nav_parent_url].parent
         if _is_relative_to(current, parent_dir):
             continue
         final_mapping[page.canonical_url] = _move_page_under_folder(current, parent_dir)
@@ -328,6 +335,8 @@ def _page_index_path(path: PurePosixPath) -> PurePosixPath:
     if path.name == "_index.md":
         return path
     if path.suffix.lower() == ".md":
+        if path.parent.name.lower() == path.stem.lower():
+            return path.parent / "_index.md"
         return path.parent / path.stem / "_index.md"
     return path / "_index.md"
 
@@ -350,24 +359,97 @@ def _is_relative_to(path: PurePosixPath, parent: PurePosixPath) -> bool:
 
 def _build_child_mapping(pages: list[Page]) -> dict[str, list[str]]:
     existing = {page.canonical_url for page in pages}
+    nav_url_by_path = _nav_url_by_path(pages)
     children: dict[str, list[str]] = defaultdict(list)
     for page in pages:
-        if page.parent_url in existing:
-            children[page.parent_url].append(page.canonical_url)
+        nav_parent_url = _nav_parent_url(page, existing, nav_url_by_path)
+        if nav_parent_url in existing:
+            children[nav_parent_url].append(page.canonical_url)
     return {parent: list(dict.fromkeys(urls)) for parent, urls in children.items()}
 
 
 def _build_order_mapping(pages: list[Page]) -> dict[str, int]:
     existing = {page.canonical_url for page in pages}
+    nav_url_by_path = _nav_url_by_path(pages)
     sibling_groups: dict[str | None, list[str]] = defaultdict(list)
     for page in pages:
-        parent = page.parent_url if page.parent_url in existing else None
+        parent = _nav_parent_url(page, existing, nav_url_by_path)
         sibling_groups[parent].append(page.canonical_url)
     return {
         url: index
         for urls in sibling_groups.values()
         for index, url in enumerate(dict.fromkeys(urls), start=1)
     }
+
+
+def _remove_stale_page_alternates(root: Path, relpath: PurePosixPath) -> None:
+    if relpath.name == "_index.md":
+        stale = root / Path(*relpath.parent.parts) if str(relpath.parent) != "." else root
+        stale = stale.with_suffix(".md")
+        _unlink_file(stale)
+        return
+    if relpath.suffix.lower() == ".md":
+        stale = root / Path(*relpath.parent.parts, relpath.stem, "_index.md")
+        _unlink_file(stale)
+        _remove_empty_parents(stale.parent, root)
+
+
+def _unlink_file(path: Path) -> None:
+    try:
+        if path.is_file():
+            path.unlink()
+    except OSError:
+        return
+
+
+def _remove_empty_parents(path: Path, stop_at: Path) -> None:
+    stop_at = stop_at.resolve()
+    current = path
+    while True:
+        try:
+            resolved = current.resolve()
+        except OSError:
+            return
+        if resolved == stop_at or stop_at not in resolved.parents:
+            return
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
+
+
+def _nav_parent_by_url(pages: list[Page]) -> dict[str, str | None]:
+    existing = {page.canonical_url for page in pages}
+    nav_url_by_path = _nav_url_by_path(pages)
+    return {
+        page.canonical_url: _nav_parent_url(page, existing, nav_url_by_path)
+        for page in pages
+    }
+
+
+def _nav_url_by_path(pages: list[Page]) -> dict[tuple[str, ...], str]:
+    mapping: dict[tuple[str, ...], str] = {}
+    for page in pages:
+        if page.nav_path:
+            mapping.setdefault(page.nav_path, page.canonical_url)
+    return mapping
+
+
+def _nav_parent_url(
+    page: Page,
+    existing_urls: object,
+    nav_url_by_path: dict[tuple[str, ...], str],
+) -> str | None:
+    existing = set(existing_urls)
+    if page.nav_parent_url == page.canonical_url:
+        return None
+    if page.nav_parent_url in existing:
+        return page.nav_parent_url
+    if len(page.nav_path) > 1:
+        parent_url = nav_url_by_path.get(page.nav_path[:-1])
+        return parent_url if parent_url != page.canonical_url else None
+    return None
 
 
 def _local_html_relpath(path: Path) -> PurePosixPath:

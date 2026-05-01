@@ -25,6 +25,8 @@ class Page:
     content_type: str = "text/html"
     status_code: int = 200
     parent_url: str | None = None
+    nav_parent_url: str | None = None
+    nav_path: tuple[str, ...] = ()
     links_internal: list[str] = field(default_factory=list)
     links_external: list[str] = field(default_factory=list)
     anchor_headings: dict[str, str] = field(default_factory=dict)

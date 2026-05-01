@@ -4,7 +4,7 @@ import hashlib
 import re
 from pathlib import Path
 from pathlib import PurePosixPath
-from urllib.parse import quote, unquote, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse, urlunparse
 
 
 HTML_SUFFIXES = {".html", ".htm", ".xhtml"}
@@ -24,6 +24,21 @@ def canonicalize_url(url: str, base_url: str | None = None) -> str:
     if path != "/" and path.endswith("/"):
         path = path.rstrip("/")
     return urlunparse((scheme, netloc, path, "", "", ""))
+
+
+def extract_tocpath(url: str, base_url: str | None = None) -> tuple[str, ...]:
+    absolute = urljoin(base_url or "", url)
+    parsed = urlparse(absolute)
+    query = parse_qs(parsed.query, keep_blank_values=False)
+    values = next((value for key, value in query.items() if key.lower() == "tocpath"), [])
+    if not values:
+        return ()
+    parts = []
+    for part in values[0].split("|"):
+        clean = unquote(part).strip()
+        if clean and not clean.startswith("_____"):
+            parts.append(clean)
+    return tuple(parts)
 
 
 def same_domain(url: str, root_url: str) -> bool:

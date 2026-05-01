@@ -112,3 +112,32 @@ def test_cleanup_rules_ignore_fenced_code() -> None:
 **\u0414\u0430\u043b\u0435\u0435 >> ** [Step 2](2.md)
 ```
 """
+
+
+def test_drops_embedded_madcap_navigation_before_real_article() -> None:
+    markdown = """
+# Helpful Functions
+  * [Files](file.md)
+  * [Search](search.md)
+  * [Lists](lists.md)
+  * [Forms](forms.md)
+  * [Favorites](favorites.md)
+
+[Skip To Main Content](#mc-main-content)
+
+<image src="./transparent.gif"/>
+
+  * [Intro](intro.md)
+  * [Quick Start](quick.md)
+    * [Step 1](1.md)
+    * [Step 2](2.md)
+
+[Quick Start](../../_index.md) > Helpful Functions
+# Helpful Functions
+Actual article text.
+"""
+
+    assert normalize_markdown(markdown) == """[Quick Start](../../_index.md) > Helpful Functions
+# Helpful Functions
+Actual article text.
+"""

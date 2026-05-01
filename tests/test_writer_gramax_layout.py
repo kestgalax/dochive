@@ -24,6 +24,7 @@ def test_writer_uses_gramax_index_for_pages_with_children(tmp_path: Path) -> Non
             markdown=f"[Parent]({parent_url})\n",
             depth=1,
             parent_url=parent_url,
+            nav_parent_url=parent_url,
             links_internal=[parent_url],
         ),
         Page(
@@ -65,6 +66,190 @@ def test_writer_uses_gramax_index_for_pages_with_children(tmp_path: Path) -> Non
     assert "order: 2" in pages_catalog
     assert 'to: "docs/beta_35/_index.md"' in links_catalog
     assert 'to: "docs/beta_35/kakaya-to-stranica.md"' in links_catalog
+
+
+def test_writer_collapses_duplicate_section_filename_for_index_page(tmp_path: Path) -> None:
+    parent_url = "https://example.com/docs/QuickStartSDPro/QuickStartSDPro.htm"
+    child_url = "https://example.com/docs/QuickStartSDPro/1.htm"
+    root = write_mirror(
+        [
+            Page(
+                source_url=parent_url,
+                canonical_url=parent_url,
+                title="Quick Start",
+                markdown=f"[Step 1]({child_url})\n",
+                depth=0,
+                links_internal=[child_url],
+            ),
+            Page(
+                source_url=child_url,
+                canonical_url=child_url,
+                title="Step 1",
+                markdown="Step.\n",
+                depth=1,
+                nav_parent_url=parent_url,
+            ),
+        ],
+        MirrorConfig(source=parent_url, out_dir=tmp_path),
+    )
+
+    parent_path = root / "docs" / "quickstartsdpro" / "_index.md"
+    child_path = root / "docs" / "quickstartsdpro" / "1.md"
+
+    assert parent_path.exists()
+    assert child_path.exists()
+    assert not (root / "docs" / "quickstartsdpro" / "quickstartsdpro" / "_index.md").exists()
+    assert "[Step 1](1.md)" in parent_path.read_text(encoding="utf-8")
+    assert 'parent: "docs/quickstartsdpro/_index.md"' in child_path.read_text(encoding="utf-8")
+
+
+def test_writer_does_not_nest_context_links_without_nav_parent(tmp_path: Path) -> None:
+    source_url = "https://example.com/docs/current.htm"
+    target_url = "https://example.com/docs/other-section/target.htm"
+    pages = [
+        Page(
+            source_url=source_url,
+            canonical_url=source_url,
+            title="Current",
+            markdown=f"[Context]({target_url})\n",
+            depth=0,
+            links_internal=[target_url],
+        ),
+        Page(
+            source_url=target_url,
+            canonical_url=target_url,
+            title="Target",
+            markdown="Target page.\n",
+            depth=1,
+            parent_url=source_url,
+        ),
+    ]
+
+    root = write_mirror(pages, MirrorConfig(source=source_url, out_dir=tmp_path))
+
+    source_path = root / "docs" / "current.md"
+    target_path = root / "docs" / "other-section" / "target.md"
+
+    assert source_path.exists()
+    assert target_path.exists()
+    assert not (root / "docs" / "current" / "_index.md").exists()
+    assert "[Context](other-section/target.md)" in source_path.read_text(encoding="utf-8")
+    assert 'parent: null' in target_path.read_text(encoding="utf-8")
+
+
+def test_writer_uses_nav_path_instead_of_discovery_parent(tmp_path: Path) -> None:
+    root_url = "https://example.com/docs/root.htm"
+    wrong_discovery_url = "https://example.com/docs/context.htm"
+    parent_url = "https://example.com/docs/parent.htm"
+    child_url = "https://example.com/docs/child.htm"
+    pages = [
+        Page(
+            source_url=wrong_discovery_url,
+            canonical_url=wrong_discovery_url,
+            title="Context",
+            markdown=f"[Child]({child_url})\n",
+            depth=0,
+            links_internal=[child_url],
+        ),
+        Page(
+            source_url=parent_url,
+            canonical_url=parent_url,
+            title="Parent",
+            markdown="Parent.\n",
+            depth=1,
+            nav_path=("Root", "Parent"),
+        ),
+        Page(
+            source_url=child_url,
+            canonical_url=child_url,
+            title="Child",
+            markdown="Child.\n",
+            depth=1,
+            parent_url=wrong_discovery_url,
+            nav_path=("Root", "Parent", "Child"),
+        ),
+    ]
+
+    root = write_mirror(pages, MirrorConfig(source=root_url, out_dir=tmp_path))
+
+    parent_path = root / "docs" / "parent" / "_index.md"
+    child_path = root / "docs" / "parent" / "child.md"
+    context_path = root / "docs" / "context.md"
+
+    assert parent_path.exists()
+    assert child_path.exists()
+    assert context_path.exists()
+    assert 'parent: "docs/parent/_index.md"' in child_path.read_text(encoding="utf-8")
+    assert 'children:\n  - "docs/parent/child.md"' in parent_path.read_text(encoding="utf-8")
+
+
+def test_writer_ignores_self_nav_parent(tmp_path: Path) -> None:
+    page_url = "https://example.com/docs/current.htm"
+    root = write_mirror(
+        [
+            Page(
+                source_url=page_url,
+                canonical_url=page_url,
+                title="Current",
+                markdown="Current.\n",
+                depth=0,
+                nav_parent_url=page_url,
+            )
+        ],
+        MirrorConfig(source=page_url, out_dir=tmp_path),
+    )
+
+    text = (root / "docs" / "current.md").read_text(encoding="utf-8")
+
+    assert "parent: null" in text
+    assert "children:\n  []" in text
+
+
+def test_writer_removes_stale_flat_page_when_it_becomes_index(tmp_path: Path) -> None:
+    page_url = "https://example.com/docs/quickstart/6.htm"
+    child_url = "https://example.com/docs/quickstart/work_portal.htm"
+
+    root = write_mirror(
+        [
+            Page(
+                source_url=page_url,
+                canonical_url=page_url,
+                title="Step 6",
+                markdown="Step.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=page_url, out_dir=tmp_path),
+    )
+    flat_path = root / "docs" / "quickstart" / "6.md"
+
+    assert flat_path.exists()
+
+    write_mirror(
+        [
+            Page(
+                source_url=page_url,
+                canonical_url=page_url,
+                title="Step 6",
+                markdown=f"[Portal]({child_url})\n",
+                depth=0,
+                links_internal=[child_url],
+            ),
+            Page(
+                source_url=child_url,
+                canonical_url=child_url,
+                title="Portal",
+                markdown="Portal.\n",
+                depth=1,
+                nav_parent_url=page_url,
+            ),
+        ],
+        MirrorConfig(source=page_url, out_dir=tmp_path),
+    )
+
+    assert not flat_path.exists()
+    assert (root / "docs" / "quickstart" / "6" / "_index.md").exists()
+    assert (root / "docs" / "quickstart" / "6" / "work_portal.md").exists()
 
 
 def test_index_page_assets_stay_beside_index_file() -> None:

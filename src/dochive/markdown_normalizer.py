@@ -36,6 +36,7 @@ def normalize_markdown(markdown: str, *, clean: bool = True, extra_noise_lines: 
     if clean:
         text = _drop_noise_lines(text, DEFAULT_NOISE_LINES | set(extra_noise_lines))
         text = _trim_leading_page_chrome(text)
+        text = _drop_embedded_navigation_chrome(text)
         text = _drop_footer_chrome(text)
         text = _collapse_repeated_lines(text)
         text = _normalize_blank_lines(text)
@@ -217,6 +218,39 @@ def _trim_leading_page_chrome(text: str) -> str:
     if _looks_like_navigation_chrome(lines[:keep_from]):
         return "\n".join(lines[keep_from:])
     return text
+
+
+def _drop_embedded_navigation_chrome(text: str) -> str:
+    lines = text.splitlines()
+    first_h1 = _first_h1_index(lines)
+    if first_h1 is None:
+        return text
+
+    chrome_marker = None
+    for index in range(first_h1 + 1, len(lines)):
+        normalized = _line_text(lines[index])
+        if "Skip To Main Content" in normalized or "transparent" in normalized:
+            chrome_marker = index
+            break
+    if chrome_marker is None:
+        return text
+
+    next_h1 = None
+    for index in range(chrome_marker + 1, len(lines)):
+        if re.match(r"^#\s+\S", lines[index].strip()):
+            next_h1 = index
+            break
+    if next_h1 is None:
+        return text
+
+    if not _looks_like_navigation_chrome(lines[first_h1:next_h1]):
+        return text
+
+    keep_from = next_h1
+    previous_index = _previous_nonblank_index(lines, next_h1)
+    if previous_index is not None and _looks_like_breadcrumb(lines[previous_index]):
+        keep_from = previous_index
+    return "\n".join(lines[:first_h1] + lines[keep_from:])
 
 
 def _first_h1_index(lines: list[str]) -> int | None:
