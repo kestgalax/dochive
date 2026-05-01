@@ -23,6 +23,7 @@ HTML_MEDIA_URL_RE = re.compile(
     r"(<(?:video|source)\b[^>]*\b(?:path|src)=[\"'])([^\"']+)([\"'][^>]*>)",
     re.IGNORECASE,
 )
+DOC_ROOT_FILENAME = ".doc-root.yaml"
 
 
 def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[MirrorIssue] | None = None) -> Path:
@@ -35,6 +36,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     child_urls_by_parent = _build_child_mapping(pages)
     path_by_url = _build_path_mapping(pages, config, child_urls_by_parent)
     order_by_url = _build_order_mapping(pages)
+    anchor_headings_by_url = {page.canonical_url: page.anchor_headings for page in pages}
     now = datetime.now(timezone.utc).isoformat()
     written_pages: list[dict[str, object]] = []
     written_links: list[dict[str, object]] = []
@@ -49,7 +51,14 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
 
         assets, asset_errors = _materialize_assets(page.assets, page, root, config, relpath)
         written_errors.extend(asset_errors)
-        markdown = _rewrite_markdown_links(page.markdown, page, relpath, path_by_url, assets, config)
+        markdown = _rewrite_markdown_links(
+            page,
+            relpath,
+            path_by_url,
+            anchor_headings_by_url,
+            assets,
+            config,
+        )
         content_hash = "sha256:" + hashlib.sha256(markdown.encode("utf-8")).hexdigest()
         frontmatter = _page_frontmatter(
             page,
@@ -95,6 +104,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
             )
 
     _write_folder_indexes(root, pages, path_by_url, order_by_url)
+    _write_doc_root_files(root, path_by_url)
     sync_report = _sync_report(previous_hashes, written_pages, source=config.source, generated_at=now)
     (catalog_dir / "pages.yaml").write_text(dumps_yaml({"pages": written_pages}), encoding="utf-8")
     (catalog_dir / "links.yaml").write_text(dumps_yaml({"links": written_links}), encoding="utf-8")
@@ -422,6 +432,32 @@ def _write_folder_indexes(
         (folder_path / "_index.yaml").write_text(dumps_yaml(payload), encoding="utf-8")
 
 
+def _write_doc_root_files(root: Path, path_by_url: dict[str, PurePosixPath]) -> None:
+    for doc_root in _doc_root_folders(path_by_url.values()):
+        folder_path = root if str(doc_root) == "." else root / Path(*doc_root.parts)
+        folder_path.mkdir(parents=True, exist_ok=True)
+        doc_root_path = folder_path / DOC_ROOT_FILENAME
+        if not doc_root_path.exists():
+            doc_root_path.write_text(_doc_root_content(folder_path.name or "docs"), encoding="utf-8")
+
+
+def _doc_root_folders(paths: object) -> list[PurePosixPath]:
+    folders: set[PurePosixPath] = set()
+    for path in paths:
+        if not isinstance(path, PurePosixPath):
+            continue
+        parts = path.parts
+        for index, part in enumerate(parts):
+            if part.lower() == "content":
+                folders.add(PurePosixPath(*parts[:index]) if index else PurePosixPath("."))
+                break
+    return sorted(folders, key=lambda folder: str(folder))
+
+
+def _doc_root_content(title: str) -> str:
+    return f"title: {title}\nsyntax: XML\nsupportedLanguages: []\nproperties: []\n"
+
+
 def _folder_title(folder: PurePosixPath) -> str:
     name = folder.name if str(folder) != "." else "Documentation Mirror"
     return name.replace("-", " ").replace("_", " ").title()
@@ -432,13 +468,14 @@ def _keywords(title: str) -> list[str]:
 
 
 def _rewrite_markdown_links(
-    markdown: str,
     page: Page,
     current_relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
+    anchor_headings_by_url: dict[str, dict[str, str]],
     assets: list[Asset],
     config: MirrorConfig,
 ) -> str:
+    markdown = page.markdown
     asset_by_source = {asset.source: asset for asset in assets if asset.local_path}
     markdown = IMAGE_TEXT_LINK_RE.sub(lambda match: f"[{match.group(1).strip()}]({match.group(2).strip()})", markdown)
 
@@ -449,7 +486,14 @@ def _rewrite_markdown_links(
         )
     else:
         markdown = NESTED_IMAGE_LINK_RE.sub(
-            lambda match: _nested_image_to_linked(match, page, current_relpath, path_by_url, asset_by_source),
+            lambda match: _nested_image_to_linked(
+                match,
+                page,
+                current_relpath,
+                path_by_url,
+                anchor_headings_by_url,
+                asset_by_source,
+            ),
             markdown,
         )
 
@@ -463,10 +507,24 @@ def _rewrite_markdown_links(
                     asset,
                     config,
                 )
-        return _rewrite_single_target(match, page, current_relpath, path_by_url, asset_by_source)
+        return _rewrite_single_target(
+            match,
+            page,
+            current_relpath,
+            path_by_url,
+            anchor_headings_by_url,
+            asset_by_source,
+        )
 
     markdown = LINK_RE.sub(replace, markdown)
-    markdown = _rewrite_html_media_sources(markdown, page, current_relpath, path_by_url, asset_by_source)
+    markdown = _rewrite_html_media_sources(
+        markdown,
+        page,
+        current_relpath,
+        path_by_url,
+        anchor_headings_by_url,
+        asset_by_source,
+    )
     markdown = _normalize_media_spacing(markdown)
     return _render_details_sections(markdown)
 
@@ -566,10 +624,18 @@ def _rewrite_html_media_sources(
     page: Page,
     current_relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
+    anchor_headings_by_url: dict[str, dict[str, str]],
     asset_by_source: dict[str, Asset],
 ) -> str:
     def replace(match: re.Match[str]) -> str:
-        rewritten = _rewrite_target_text(match.group(2).strip(), page, current_relpath, path_by_url, asset_by_source)
+        rewritten = _rewrite_target_text(
+            match.group(2).strip(),
+            page,
+            current_relpath,
+            path_by_url,
+            anchor_headings_by_url,
+            asset_by_source,
+        )
         return match.group(1) + rewritten + match.group(3)
 
     return HTML_MEDIA_URL_RE.sub(replace, markdown)
@@ -624,11 +690,12 @@ def _nested_image_to_linked(
     page: Page,
     current_relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
+    anchor_headings_by_url: dict[str, dict[str, str]],
     asset_by_source: dict[str, Asset],
 ) -> str:
     alt, thumb_target, full_target = (group.strip() for group in match.groups())
-    thumb = _rewrite_target_text(thumb_target, page, current_relpath, path_by_url, asset_by_source)
-    full = _rewrite_target_text(full_target, page, current_relpath, path_by_url, asset_by_source)
+    thumb = _rewrite_target_text(thumb_target, page, current_relpath, path_by_url, anchor_headings_by_url, asset_by_source)
+    full = _rewrite_target_text(full_target, page, current_relpath, path_by_url, anchor_headings_by_url, asset_by_source)
     return f"[![{alt}]({thumb})]({full})"
 
 
@@ -644,23 +711,20 @@ def _rewrite_single_target(
     page: Page,
     current_relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
+    anchor_headings_by_url: dict[str, dict[str, str]],
     asset_by_source: dict[str, Asset],
 ) -> str:
     prefix, target, suffix = match.groups()
     clean_target = target.strip()
-    if clean_target.startswith("#"):
-        return match.group(0)
     if clean_target in asset_by_source:
         return prefix + _relative_asset_path(asset_by_source[clean_target], current_relpath) + suffix
-    normalized = _normalize_markdown_target(clean_target, page)
-    if normalized in asset_by_source:
-        return prefix + _relative_asset_path(asset_by_source[normalized], current_relpath) + suffix
-    if normalized in path_by_url:
-        rel = os.path.relpath(
-            Path(*path_by_url[normalized].parts),
-            start=Path(*current_relpath.parent.parts) if str(current_relpath.parent) != "." else Path("."),
-        ).replace("\\", "/")
-        return prefix + rel + suffix
+    if not clean_target.startswith("#"):
+        normalized = _normalize_markdown_target(clean_target, page)
+        if normalized in asset_by_source:
+            return prefix + _relative_asset_path(asset_by_source[normalized], current_relpath) + suffix
+    rewritten = _rewrite_page_target(clean_target, page, current_relpath, path_by_url, anchor_headings_by_url)
+    if rewritten is not None:
+        return prefix + rewritten + suffix
     return match.group(0)
 
 
@@ -669,21 +733,71 @@ def _rewrite_target_text(
     page: Page,
     current_relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
+    anchor_headings_by_url: dict[str, dict[str, str]],
     asset_by_source: dict[str, Asset],
 ) -> str:
-    if target.startswith("#"):
-        return target
     if target in asset_by_source:
         return _relative_asset_path(asset_by_source[target], current_relpath)
-    normalized = _normalize_markdown_target(target, page)
-    if normalized in asset_by_source:
-        return _relative_asset_path(asset_by_source[normalized], current_relpath)
-    if normalized in path_by_url:
-        return os.path.relpath(
-            Path(*path_by_url[normalized].parts),
-            start=Path(*current_relpath.parent.parts) if str(current_relpath.parent) != "." else Path("."),
-        ).replace("\\", "/")
+    if not target.startswith("#"):
+        normalized = _normalize_markdown_target(target, page)
+        if normalized in asset_by_source:
+            return _relative_asset_path(asset_by_source[normalized], current_relpath)
+    rewritten = _rewrite_page_target(target, page, current_relpath, path_by_url, anchor_headings_by_url)
+    if rewritten is not None:
+        return rewritten
     return target
+
+
+def _rewrite_page_target(
+    target: str,
+    page: Page,
+    current_relpath: PurePosixPath,
+    path_by_url: dict[str, PurePosixPath],
+    anchor_headings_by_url: dict[str, dict[str, str]],
+) -> str | None:
+    base_url, fragment = _normalize_target_base_and_fragment(target, page)
+    if base_url not in path_by_url:
+        return None
+
+    rel = _relative_page_path(path_by_url[base_url], current_relpath)
+    anchor = _gramax_anchor(fragment, base_url, anchor_headings_by_url)
+    if not anchor:
+        return rel
+    if path_by_url[base_url] == current_relpath:
+        return f"#{anchor}"
+    return f"{rel}#{anchor}"
+
+
+def _relative_page_path(target_relpath: PurePosixPath, current_relpath: PurePosixPath) -> str:
+    return os.path.relpath(
+        Path(*target_relpath.parts),
+        start=Path(*current_relpath.parent.parts) if str(current_relpath.parent) != "." else Path("."),
+    ).replace("\\", "/")
+
+
+def _gramax_anchor(
+    fragment: str | None,
+    base_url: str,
+    anchor_headings_by_url: dict[str, dict[str, str]],
+) -> str:
+    if not fragment:
+        return ""
+    clean = unquote(fragment).strip()
+    if not clean:
+        return ""
+    return anchor_headings_by_url.get(base_url, {}).get(clean, clean)
+
+
+def _normalize_target_base_and_fragment(target: str, page: Page) -> tuple[str, str | None]:
+    parsed = urlparse(target)
+    fragment = parsed.fragment or None
+    if target.startswith("#"):
+        return page.canonical_url, target[1:]
+    if fragment:
+        target = target.split("#", 1)[0]
+    if not target:
+        return page.canonical_url, fragment
+    return _normalize_markdown_target(target, page), fragment
 
 
 def _relative_asset_path(asset: Asset, current_relpath: PurePosixPath) -> str:

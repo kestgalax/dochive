@@ -90,3 +90,69 @@ def test_writer_separates_media_tags_with_blank_lines() -> None:
         "<image src=\"./demo.png\"/>\n\n"
         "Done."
     )
+
+
+def test_writer_rewrites_original_anchor_to_gramax_heading(tmp_path: Path) -> None:
+    page_url = "https://example.com/docs/beta_35.htm"
+    page = Page(
+        source_url=page_url,
+        canonical_url=page_url,
+        title="Release Notes",
+        markdown="[3.5.6](#356)\n\n[Absolute](https://example.com/docs/beta_35.htm#356)\n",
+        depth=0,
+        anchor_headings={"356": "Release 3.5.6"},
+    )
+
+    root = write_mirror([page], MirrorConfig(source=page_url, out_dir=tmp_path))
+    text = (root / "docs" / "beta_35.md").read_text(encoding="utf-8")
+
+    assert "[3.5.6](#Release 3.5.6)" in text
+    assert "[Absolute](#Release 3.5.6)" in text
+    assert "beta_35.md#356" not in text
+
+
+def test_writer_creates_gramax_doc_root_next_to_content_folder(tmp_path: Path) -> None:
+    page_url = "https://example.com/docs/sd/nsdpro/Content/page.htm"
+    root = write_mirror(
+        [
+            Page(
+                source_url=page_url,
+                canonical_url=page_url,
+                title="Page",
+                markdown="Content.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=page_url, out_dir=tmp_path),
+    )
+
+    doc_root = root / "docs" / "sd" / "nsdpro" / ".doc-root.yaml"
+
+    assert doc_root.read_text(encoding="utf-8") == (
+        "title: nsdpro\n"
+        "syntax: XML\n"
+        "supportedLanguages: []\n"
+        "properties: []\n"
+    )
+
+
+def test_writer_does_not_overwrite_existing_doc_root(tmp_path: Path) -> None:
+    page_url = "https://example.com/docs/sd/nsdpro/Content/page.htm"
+    doc_root = tmp_path / "example.com" / "docs" / "sd" / "nsdpro" / ".doc-root.yaml"
+    doc_root.parent.mkdir(parents=True)
+    doc_root.write_text("title: Existing\nsyntax: XML\n", encoding="utf-8")
+
+    write_mirror(
+        [
+            Page(
+                source_url=page_url,
+                canonical_url=page_url,
+                title="Page",
+                markdown="Content.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=page_url, out_dir=tmp_path),
+    )
+
+    assert doc_root.read_text(encoding="utf-8") == "title: Existing\nsyntax: XML\n"
