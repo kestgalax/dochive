@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.request import url2pathname
 from urllib.parse import unquote, urlparse
 
-from .html_extract import extract_html_anchor_headings, file_uri, is_local_file_reference, parse_html_document
+from .html_extract import file_uri, is_local_file_reference, parse_html_document
 from .markdown_normalizer import normalize_markdown
 from .models import MirrorConfig, MirrorIssue, MirrorRun, Page
 from .url_utils import canonicalize_url
@@ -98,7 +98,6 @@ def crawl_local_html(config: MirrorConfig) -> MirrorRun:
                 parent_url=parent_url,
                 links_internal=_unique(internal),
                 links_external=_unique(external),
-                anchor_headings=extract_html_anchor_headings(html),
                 assets=parser.assets,
                 source_path=path,
             )

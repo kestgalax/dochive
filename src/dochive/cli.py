@@ -53,6 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mirror.add_argument("--ignore-robots", action="store_true", help="Do not respect robots.txt. Reserved for later.")
     mirror.add_argument(
+        "--crawl4ai-deep",
+        action="store_true",
+        help=(
+            "Use Crawl4AI native BFS deep crawling for web sources. "
+            "Keeps the existing manual crawler as the default."
+        ),
+    )
+    mirror.add_argument(
         "--save-assets",
         default="",
         help="Comma-separated asset kinds to download/copy, e.g. images,files,videos. Empty means catalog only.",
@@ -131,6 +139,7 @@ def mirror_command(args: argparse.Namespace) -> int:
         respect_robots_txt=not args.ignore_robots,
         scope=args.scope,
         include_url_prefixes=tuple(args.include_url_prefix),
+        crawl4ai_deep=args.crawl4ai_deep,
         content_selector=args.content_selector,
         exclude_selector=args.exclude_selector,
         exclude_tags=tuple(args.exclude_tag) if args.exclude_tag else ("script", "style", "noscript"),

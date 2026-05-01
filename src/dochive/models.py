@@ -27,7 +27,6 @@ class Page:
     parent_url: str | None = None
     links_internal: list[str] = field(default_factory=list)
     links_external: list[str] = field(default_factory=list)
-    anchor_headings: dict[str, str] = field(default_factory=dict)
     assets: list[Asset] = field(default_factory=list)
     source_path: Path | None = None
 
@@ -70,6 +69,7 @@ class MirrorConfig:
     respect_robots_txt: bool = True
     scope: str = "subtree"
     include_url_prefixes: tuple[str, ...] = ()
+    crawl4ai_deep: bool = False
     content_selector: str | None = None
     exclude_selector: str | None = None
     exclude_tags: tuple[str, ...] = ("script", "style", "noscript")

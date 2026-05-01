@@ -1,3 +1,4 @@
+from dochive.html_extract import promote_markdown_headings
 from dochive.markdown_normalizer import normalize_markdown
 
 
@@ -112,3 +113,33 @@ def test_cleanup_rules_ignore_fenced_code() -> None:
 **\u0414\u0430\u043b\u0435\u0435 >> ** [Step 2](2.md)
 ```
 """
+
+
+def test_promote_markdown_headings_does_not_duplicate_existing_plain_heading() -> None:
+    markdown = """Q4 - 2022
+
+* Previous section content.
+
+Q3 - 2022
+
+* Общие изменения:
+  * Новый инструмент.
+"""
+    html = """
+<html>
+<body>
+<h3>Q4 - 2022</h3>
+<ul><li>Previous section content.</li></ul>
+<h3>Q3 - 2022</h3>
+<ul>
+<li>Общие изменения:</li>
+<li>Новый инструмент.</li>
+</ul>
+</body>
+</html>
+"""
+
+    promoted = promote_markdown_headings(markdown, html)
+
+    assert promoted.count("### Q4 - 2022") == 1
+    assert promoted.count("### Q3 - 2022") == 1

@@ -92,7 +92,7 @@ def test_writer_separates_media_tags_with_blank_lines() -> None:
     )
 
 
-def test_writer_rewrites_original_anchor_to_gramax_heading(tmp_path: Path) -> None:
+def test_writer_preserves_original_link_fragments(tmp_path: Path) -> None:
     page_url = "https://example.com/docs/beta_35.htm"
     page = Page(
         source_url=page_url,
@@ -100,14 +100,13 @@ def test_writer_rewrites_original_anchor_to_gramax_heading(tmp_path: Path) -> No
         title="Release Notes",
         markdown="[3.5.6](#356)\n\n[Absolute](https://example.com/docs/beta_35.htm#356)\n",
         depth=0,
-        anchor_headings={"356": "Release 3.5.6"},
     )
 
     root = write_mirror([page], MirrorConfig(source=page_url, out_dir=tmp_path))
     text = (root / "docs" / "beta_35.md").read_text(encoding="utf-8")
 
-    assert "[3.5.6](#Release 3.5.6)" in text
-    assert "[Absolute](#Release 3.5.6)" in text
+    assert "[3.5.6](#356)" in text
+    assert "[Absolute](#356)" in text
     assert "beta_35.md#356" not in text
 
 

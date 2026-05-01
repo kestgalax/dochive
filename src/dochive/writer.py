@@ -36,7 +36,6 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     child_urls_by_parent = _build_child_mapping(pages)
     path_by_url = _build_path_mapping(pages, config, child_urls_by_parent)
     order_by_url = _build_order_mapping(pages)
-    anchor_headings_by_url = {page.canonical_url: page.anchor_headings for page in pages}
     now = datetime.now(timezone.utc).isoformat()
     written_pages: list[dict[str, object]] = []
     written_links: list[dict[str, object]] = []
@@ -55,7 +54,6 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
             page,
             relpath,
             path_by_url,
-            anchor_headings_by_url,
             assets,
             config,
         )
@@ -471,7 +469,6 @@ def _rewrite_markdown_links(
     page: Page,
     current_relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
-    anchor_headings_by_url: dict[str, dict[str, str]],
     assets: list[Asset],
     config: MirrorConfig,
 ) -> str:
@@ -491,7 +488,6 @@ def _rewrite_markdown_links(
                 page,
                 current_relpath,
                 path_by_url,
-                anchor_headings_by_url,
                 asset_by_source,
             ),
             markdown,
@@ -512,7 +508,6 @@ def _rewrite_markdown_links(
             page,
             current_relpath,
             path_by_url,
-            anchor_headings_by_url,
             asset_by_source,
         )
 
@@ -522,7 +517,6 @@ def _rewrite_markdown_links(
         page,
         current_relpath,
         path_by_url,
-        anchor_headings_by_url,
         asset_by_source,
     )
     markdown = _normalize_media_spacing(markdown)
@@ -624,7 +618,6 @@ def _rewrite_html_media_sources(
     page: Page,
     current_relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
-    anchor_headings_by_url: dict[str, dict[str, str]],
     asset_by_source: dict[str, Asset],
 ) -> str:
     def replace(match: re.Match[str]) -> str:
@@ -633,7 +626,6 @@ def _rewrite_html_media_sources(
             page,
             current_relpath,
             path_by_url,
-            anchor_headings_by_url,
             asset_by_source,
         )
         return match.group(1) + rewritten + match.group(3)
@@ -690,12 +682,11 @@ def _nested_image_to_linked(
     page: Page,
     current_relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
-    anchor_headings_by_url: dict[str, dict[str, str]],
     asset_by_source: dict[str, Asset],
 ) -> str:
     alt, thumb_target, full_target = (group.strip() for group in match.groups())
-    thumb = _rewrite_target_text(thumb_target, page, current_relpath, path_by_url, anchor_headings_by_url, asset_by_source)
-    full = _rewrite_target_text(full_target, page, current_relpath, path_by_url, anchor_headings_by_url, asset_by_source)
+    thumb = _rewrite_target_text(thumb_target, page, current_relpath, path_by_url, asset_by_source)
+    full = _rewrite_target_text(full_target, page, current_relpath, path_by_url, asset_by_source)
     return f"[![{alt}]({thumb})]({full})"
 
 
@@ -711,7 +702,6 @@ def _rewrite_single_target(
     page: Page,
     current_relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
-    anchor_headings_by_url: dict[str, dict[str, str]],
     asset_by_source: dict[str, Asset],
 ) -> str:
     prefix, target, suffix = match.groups()
@@ -722,7 +712,7 @@ def _rewrite_single_target(
         normalized = _normalize_markdown_target(clean_target, page)
         if normalized in asset_by_source:
             return prefix + _relative_asset_path(asset_by_source[normalized], current_relpath) + suffix
-    rewritten = _rewrite_page_target(clean_target, page, current_relpath, path_by_url, anchor_headings_by_url)
+    rewritten = _rewrite_page_target(clean_target, page, current_relpath, path_by_url)
     if rewritten is not None:
         return prefix + rewritten + suffix
     return match.group(0)
@@ -733,7 +723,6 @@ def _rewrite_target_text(
     page: Page,
     current_relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
-    anchor_headings_by_url: dict[str, dict[str, str]],
     asset_by_source: dict[str, Asset],
 ) -> str:
     if target in asset_by_source:
@@ -742,7 +731,7 @@ def _rewrite_target_text(
         normalized = _normalize_markdown_target(target, page)
         if normalized in asset_by_source:
             return _relative_asset_path(asset_by_source[normalized], current_relpath)
-    rewritten = _rewrite_page_target(target, page, current_relpath, path_by_url, anchor_headings_by_url)
+    rewritten = _rewrite_page_target(target, page, current_relpath, path_by_url)
     if rewritten is not None:
         return rewritten
     return target
@@ -753,19 +742,17 @@ def _rewrite_page_target(
     page: Page,
     current_relpath: PurePosixPath,
     path_by_url: dict[str, PurePosixPath],
-    anchor_headings_by_url: dict[str, dict[str, str]],
 ) -> str | None:
     base_url, fragment = _normalize_target_base_and_fragment(target, page)
     if base_url not in path_by_url:
         return None
 
     rel = _relative_page_path(path_by_url[base_url], current_relpath)
-    anchor = _gramax_anchor(fragment, base_url, anchor_headings_by_url)
-    if not anchor:
+    if not fragment:
         return rel
     if path_by_url[base_url] == current_relpath:
-        return f"#{anchor}"
-    return f"{rel}#{anchor}"
+        return f"#{fragment}"
+    return f"{rel}#{fragment}"
 
 
 def _relative_page_path(target_relpath: PurePosixPath, current_relpath: PurePosixPath) -> str:
@@ -775,24 +762,11 @@ def _relative_page_path(target_relpath: PurePosixPath, current_relpath: PurePosi
     ).replace("\\", "/")
 
 
-def _gramax_anchor(
-    fragment: str | None,
-    base_url: str,
-    anchor_headings_by_url: dict[str, dict[str, str]],
-) -> str:
-    if not fragment:
-        return ""
-    clean = unquote(fragment).strip()
-    if not clean:
-        return ""
-    return anchor_headings_by_url.get(base_url, {}).get(clean, clean)
-
-
 def _normalize_target_base_and_fragment(target: str, page: Page) -> tuple[str, str | None]:
     parsed = urlparse(target)
-    fragment = parsed.fragment or None
+    fragment = unquote(parsed.fragment).strip() if parsed.fragment else None
     if target.startswith("#"):
-        return page.canonical_url, target[1:]
+        return page.canonical_url, unquote(target[1:]).strip()
     if fragment:
         target = target.split("#", 1)[0]
     if not target:

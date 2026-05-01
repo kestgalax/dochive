@@ -76,26 +76,6 @@ def test_depth_three_still_stops_at_twenty_pages(tmp_path: Path) -> None:
     assert Path(run.pages[-1].source_path).name == "child-19.html"
 
 
-def test_local_crawl_maps_named_anchor_to_following_heading(tmp_path: Path) -> None:
-    (tmp_path / "index.html").write_text(
-        """<!doctype html>
-<html>
-<head><title>Index</title></head>
-<body>
-<a href="#356">3.5.6</a>
-<a name="356"></a>
-<h2>Release 3.5.6</h2>
-</body>
-</html>
-""",
-        encoding="utf-8",
-    )
-
-    run = crawl_local_html(MirrorConfig(source=str(tmp_path), out_dir=tmp_path / "out"))
-
-    assert run.pages[0].anchor_headings == {"356": "Release 3.5.6"}
-
-
 def _write_page(path: Path, title: str, links: list[str]) -> None:
     anchors = "\n".join(f'<a href="{href}">{href}</a>' for href in links)
     path.write_text(

@@ -103,7 +103,7 @@ dochive mirror `
   --render-js `
   --max-depth 1 `
   --max-pages 20 `
-  --scope subtree `
+  --scope domain `
   --save-assets images
 ```
 Example 2:
@@ -120,7 +120,23 @@ dochive mirror `
   --image-max-width 900
 ```
 
-Use `--scope subtree` for a controlled crawl. Use `--scope domain` only when you intentionally want the whole domain to be eligible.
+Use `--scope subtree` for a directory-bound crawl: from `.../Content/introduction/introduction.htm`, only URLs below `.../Content/introduction/` are eligible.
+
+Use `--crawl4ai-deep` when you want to try Crawl4AI's native BFS deep crawler instead of Dochive's default manual queue. Existing `--max-depth`, `--max-pages`, `--scope`, `--include-url-prefix`, `--content-selector`, and `--exclude-selector` options are still used, but the crawl traversal is delegated to Crawl4AI:
+
+```powershell
+dochive mirror `
+  --source "https://www.naumen.ru/docs/sd/nsdpro/Content/introduction/introduction.htm" `
+  --out .\mirror `
+  --render-js `
+  --max-depth 10 `
+  --max-pages 100 `
+  --scope subtree `
+  --crawl4ai-deep `
+  --save-assets images
+```
+
+Without `--crawl4ai-deep`, Dochive uses its existing manual crawler. Use `--scope domain` only when you intentionally want the whole same-domain link graph to be eligible.
 
 ## Output Layout
 

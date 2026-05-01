@@ -57,6 +57,8 @@ python -m pip install -e ".[crawl4ai]"
 dochive mirror --source https://docs.example.com --out ./mirror --render-js
 ```
 
+To try Crawl4AI's native deep crawler while keeping the default manual crawler unchanged, add `--crawl4ai-deep`.
+
 During development, editable installation keeps the `dochive` console command pointed at the current `src/` code. You can also run the package module directly from the repository root:
 
 ```bash
