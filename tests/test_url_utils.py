@@ -1,6 +1,26 @@
+import asyncio
+from pathlib import Path
+
+from dochive.models import MirrorConfig
 from dochive.models import Page
-from dochive.web_source import _nav_path_points_to_current_page, _remember_navigation_hint
+from dochive.web_source import _build_navigation_index, _nav_path_points_to_current_page, _remember_navigation_hint
 from dochive.url_utils import canonicalize_url, extract_tocpath
+
+
+class FakeCrawlResult:
+    success = True
+
+    def __init__(self, title: str, links: list[dict[str, str]]) -> None:
+        self.metadata = {"title": title}
+        self.links = {"internal": links}
+
+
+class FakeCrawler:
+    def __init__(self, pages: dict[str, FakeCrawlResult]) -> None:
+        self.pages = pages
+
+    async def arun(self, *, url: str, config: object) -> FakeCrawlResult:
+        return self.pages[url]
 
 
 def test_canonical_url_drops_tocpath_but_tocpath_can_be_extracted() -> None:
@@ -122,3 +142,106 @@ def test_navigation_hint_keeps_existing_path_but_upgrades_fetch_url() -> None:
     assert target_page.source_url == target_fetch_url
     assert target_page.nav_path == existing_path
     assert target_page.nav_parent_url == parent_url
+
+
+def test_navigation_index_is_built_before_content_fetch_and_upgrades_plain_link() -> None:
+    root_url = "https://example.com/docs/root.htm"
+    parent_url = "https://example.com/docs/parent.htm"
+    child_url = "https://example.com/docs/child.htm"
+    parent_fetch_url = f"{parent_url}?tocpath=Root%7CParent%7C_____0"
+    child_fetch_url = f"{child_url}?tocpath=Root%7CParent%7CChild%7C_____0"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult(
+                "Root - Naumen SD Pro",
+                [
+                    {"href": child_url, "text": "Child"},
+                    {"href": parent_fetch_url, "text": "Parent"},
+                ],
+            ),
+            child_url: FakeCrawlResult("Child - Naumen SD Pro", []),
+            child_fetch_url: FakeCrawlResult("Child - Naumen SD Pro", []),
+            parent_fetch_url: FakeCrawlResult("Parent - Naumen SD Pro", [{"href": child_fetch_url, "text": "Child"}]),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=(),
+            allowed_prefixes=("https://example.com/docs/",),
+        )
+    )
+
+    assert issues == []
+    assert entries[child_url].fetch_url == child_fetch_url
+    assert entries[child_url].nav_parent_url == parent_url
+    assert entries[child_url].nav_path == ("Root", "Parent", "Child")
+    assert entries[child_url].depth == 2
+
+
+def test_navigation_index_prioritizes_tocpath_links_for_page_limit() -> None:
+    root_url = "https://example.com/docs/root.htm"
+    context_url = "https://example.com/docs/context.htm"
+    nav_url = "https://example.com/docs/nav.htm"
+    nav_fetch_url = f"{nav_url}?tocpath=Root%7CNav%7C_____0"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult(
+                "Root - Naumen SD Pro",
+                [
+                    {"href": context_url, "text": "Context"},
+                    {"href": nav_fetch_url, "text": "Nav"},
+                ],
+            ),
+            nav_fetch_url: FakeCrawlResult("Nav - Naumen SD Pro", []),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=2, max_pages=2),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=(),
+            allowed_prefixes=("https://example.com/docs/",),
+        )
+    )
+
+    assert issues == []
+    assert nav_url in entries
+    assert context_url not in entries
+
+
+def test_navigation_index_does_not_add_new_pages_from_plain_context_links() -> None:
+    root_url = "https://example.com/docs/root.htm"
+    old_url = "https://example.com/docs/old.htm"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult(
+                "Root - Naumen SD Pro",
+                [{"href": old_url, "text": "Old page"}],
+            ),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=(),
+            allowed_prefixes=("https://example.com/docs/",),
+        )
+    )
+
+    assert issues == []
+    assert old_url not in entries

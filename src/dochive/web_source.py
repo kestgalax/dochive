@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -15,6 +16,17 @@ from .text_utils import repair_mojibake
 from .url_utils import canonicalize_url, extract_tocpath, same_domain
 
 MARKDOWN_BREADCRUMB_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)|([^>\n]+)")
+
+
+@dataclass
+class NavigationEntry:
+    canonical_url: str
+    fetch_url: str
+    depth: int
+    order: int
+    discovered_from_url: str | None = None
+    nav_parent_url: str | None = None
+    nav_path: tuple[str, ...] = ()
 
 
 def crawl_web(config: MirrorConfig) -> MirrorRun:
@@ -48,13 +60,6 @@ async def _crawl_web_async(config: MirrorConfig) -> list[Page]:
     allowed_prefixes = _allowed_prefixes(root_url, config)
     root_fetch_url = config.source
     root_nav_path = extract_tocpath(config.source)
-    queue: deque[tuple[str, int, str | None]] = deque([(root_url, 0, None)])
-    fetch_url_by_canonical: dict[str, str] = {root_url: root_fetch_url}
-    nav_path_by_canonical: dict[str, tuple[str, ...]] = {root_url: root_nav_path} if root_nav_path else {}
-    nav_parent_by_canonical: dict[str, str] = {}
-    seen: set[str] = set()
-    pages: list[Page] = []
-    page_by_canonical: dict[str, Page] = {}
     issues: list[MirrorIssue] = []
 
     browser_config_kwargs: dict[str, object] = {"headless": True}
@@ -78,132 +83,207 @@ async def _crawl_web_async(config: MirrorConfig) -> list[Page]:
     )
 
     async with AsyncWebCrawler(config=browser_config) as crawler:
-        while queue and len(pages) < config.max_pages:
-            url, depth, parent_url = queue.popleft()
-            url = canonicalize_url(url)
-            if url in seen or depth > config.max_depth:
-                continue
-            seen.add(url)
-            fetch_url = fetch_url_by_canonical.get(url, url)
+        nav_index, nav_issues = await _build_navigation_index(
+            crawler,
+            run_config,
+            config,
+            root_url=root_url,
+            root_fetch_url=root_fetch_url,
+            root_nav_path=root_nav_path,
+            allowed_prefixes=allowed_prefixes,
+        )
+        issues.extend(nav_issues)
+        pages, page_issues = await _fetch_pages_from_navigation_index(
+            crawler,
+            run_config,
+            config,
+            nav_index,
+            root_url=root_url,
+            allowed_prefixes=allowed_prefixes,
+        )
+        issues.extend(page_issues)
 
-            try:
-                result = await crawler.arun(url=fetch_url, config=run_config)
-            except Exception as exc:
-                issues.append(
-                    MirrorIssue(
-                        kind="fetch_exception",
-                        message=str(exc),
-                        url=fetch_url,
-                        severity="error",
-                    )
-                )
+    return MirrorRun(pages=pages, issues=issues)
+
+
+async def _build_navigation_index(
+    crawler: object,
+    run_config: object,
+    config: MirrorConfig,
+    *,
+    root_url: str,
+    root_fetch_url: str,
+    root_nav_path: tuple[str, ...],
+    allowed_prefixes: tuple[str, ...],
+) -> tuple[dict[str, NavigationEntry], list[MirrorIssue]]:
+    entries: dict[str, NavigationEntry] = {
+        root_url: NavigationEntry(
+            canonical_url=root_url,
+            fetch_url=root_fetch_url,
+            depth=0,
+            order=1,
+            nav_path=root_nav_path,
+        )
+    }
+    fetch_url_by_canonical: dict[str, str] = {root_url: root_fetch_url}
+    nav_path_by_canonical: dict[str, tuple[str, ...]] = {root_url: root_nav_path} if root_nav_path else {}
+    nav_parent_by_canonical: dict[str, str] = {}
+    queue: deque[str] = deque([root_url])
+    seen: set[str] = set()
+    issues: list[MirrorIssue] = []
+
+    while queue:
+        url = queue.popleft()
+        entry = entries.get(url)
+        if not entry or url in seen or entry.depth > config.max_depth:
+            continue
+        seen.add(url)
+
+        result, issue = await _fetch_crawl_result(crawler, run_config, entry.fetch_url, "navigation")
+        if issue:
+            issues.append(issue)
+            continue
+
+        metadata = getattr(result, "metadata", {}) or {}
+        title = repair_mojibake(metadata.get("title", ""))
+        links = getattr(result, "links", {}) or {}
+        internal_links = list(links.get("internal", [])) if isinstance(links, dict) else []
+        internal_links.sort(key=lambda item: 0 if _link_tocpath(item, entry.fetch_url) else 1)
+        for item in internal_links:
+            href = item.get("href") if isinstance(item, dict) else None
+            if not href:
                 continue
-            if not getattr(result, "success", False):
-                issues.append(
-                    MirrorIssue(
-                        kind="fetch_failed",
-                        message=str(getattr(result, "error_message", "") or "Crawl4AI returned success=false."),
-                        url=fetch_url,
-                        severity="error",
-                    )
-                )
+            link_text = repair_mojibake(str(item.get("text") or item.get("title") or "")).strip()
+            target_fetch_url = urljoin(entry.fetch_url, href)
+            target = canonicalize_url(target_fetch_url)
+            if not _is_allowed_url(target, root_url, allowed_prefixes, config):
                 continue
 
-            metadata = getattr(result, "metadata", {}) or {}
-            title = repair_mojibake(metadata.get("title", ""))
-            markdown_obj = getattr(result, "markdown", "")
-            markdown = getattr(markdown_obj, "raw_markdown", None) or str(markdown_obj or "")
-            html = getattr(result, "html", None) or getattr(result, "cleaned_html", "") or ""
-            if html:
-                markdown = promote_markdown_headings(markdown, html)
-                markdown = inject_html_videos(markdown, html, fetch_url)
-            markdown = normalize_markdown(
-                markdown,
-                clean=config.clean_markdown,
-                extra_noise_lines=config.noise_lines,
+            target_nav_path = extract_tocpath(target_fetch_url)
+            if not target_nav_path and target not in entries:
+                continue
+            nav_path, _nav_parent_url = _navigation_hint(
+                target,
+                target_nav_path=target_nav_path,
+                link_text=link_text,
+                current_url=url,
+                current_title=title,
             )
-            links = getattr(result, "links", {}) or {}
-            media = getattr(result, "media", {}) or {}
+            depth = _navigation_depth(nav_path, entry.depth + 1)
+            if target not in entries and (depth > config.max_depth or len(entries) >= config.max_pages):
+                continue
+            if target not in entries:
+                entries[target] = NavigationEntry(
+                    canonical_url=target,
+                    fetch_url=target_fetch_url,
+                    depth=depth,
+                    order=len(entries) + 1,
+                    discovered_from_url=url,
+                )
 
-            internal = []
-            external = []
-            for item in links.get("internal", []):
-                href = item.get("href") if isinstance(item, dict) else None
-                if not href:
-                    continue
-                link_text = repair_mojibake(str(item.get("text") or item.get("title") or "")).strip()
-                target_fetch_url = urljoin(fetch_url, href)
-                target = canonicalize_url(target_fetch_url)
-                target_nav_path = extract_tocpath(target_fetch_url)
-                if _is_allowed_url(target, root_url, allowed_prefixes, config):
-                    internal.append(target)
-                    _remember_navigation_hint(
-                        target,
-                        target_fetch_url=target_fetch_url,
-                        target_nav_path=target_nav_path,
-                        link_text=link_text,
-                        current_url=url,
-                        current_title=title,
-                        fetch_url_by_canonical=fetch_url_by_canonical,
-                        nav_path_by_canonical=nav_path_by_canonical,
-                        nav_parent_by_canonical=nav_parent_by_canonical,
-                        page_by_canonical=page_by_canonical,
-                    )
-                    if target not in seen and depth + 1 <= config.max_depth:
-                        queue.append((target, depth + 1, url))
-                else:
-                    external.append(target)
-            for item in links.get("external", []):
-                href = item.get("href") if isinstance(item, dict) else None
-                if href:
-                    external.append(canonicalize_url(href, fetch_url))
+            _remember_navigation_hint(
+                target,
+                target_fetch_url=target_fetch_url,
+                target_nav_path=target_nav_path,
+                link_text=link_text,
+                current_url=url,
+                current_title=title,
+                fetch_url_by_canonical=fetch_url_by_canonical,
+                nav_path_by_canonical=nav_path_by_canonical,
+                nav_parent_by_canonical=nav_parent_by_canonical,
+                page_by_canonical={},
+            )
+            _sync_navigation_entry(
+                entries[target],
+                fetch_url_by_canonical=fetch_url_by_canonical,
+                nav_path_by_canonical=nav_path_by_canonical,
+                nav_parent_by_canonical=nav_parent_by_canonical,
+            )
+            if target not in seen and entries[target].depth <= config.max_depth:
+                queue.append(target)
 
-            assets: list[Asset] = []
-            for kind, items in media.items():
-                asset_kind = "videos" if kind == "video" else kind
-                for item in items:
-                    if isinstance(item, dict):
-                        src = item.get("src") or item.get("href")
-                        if src:
-                            assets.append(
-                                Asset(
-                                    source=canonicalize_url(src, fetch_url),
-                                    kind=asset_kind,
-                                    alt=repair_mojibake(item.get("alt", "")),
-                                )
-                            )
-            if html:
-                for sources in extract_html_videos(html, fetch_url):
-                    for source in sources:
-                        assets.append(Asset(source=canonicalize_url(source, fetch_url), kind="videos"))
+    return entries, issues
 
-            markdown_assets = extract_markdown_assets(markdown, fetch_url)
-            assets = merge_assets(assets, markdown_assets)
-            result_url = canonicalize_url(getattr(result, "url", url))
-            nav_path = nav_path_by_canonical.get(url) or _extract_markdown_breadcrumb_path(markdown)
 
-            page = Page(
-                source_url=fetch_url_by_canonical.get(url, fetch_url),
-                canonical_url=result_url,
+async def _fetch_pages_from_navigation_index(
+    crawler: object,
+    run_config: object,
+    config: MirrorConfig,
+    nav_index: dict[str, NavigationEntry],
+    *,
+    root_url: str,
+    allowed_prefixes: tuple[str, ...],
+) -> tuple[list[Page], list[MirrorIssue]]:
+    pages: list[Page] = []
+    issues: list[MirrorIssue] = []
+    for entry in sorted(nav_index.values(), key=lambda item: item.order):
+        result, issue = await _fetch_crawl_result(crawler, run_config, entry.fetch_url, "content")
+        if issue:
+            issues.append(issue)
+            continue
+
+        metadata = getattr(result, "metadata", {}) or {}
+        title = repair_mojibake(metadata.get("title", ""))
+        markdown_obj = getattr(result, "markdown", "")
+        markdown = getattr(markdown_obj, "raw_markdown", None) or str(markdown_obj or "")
+        html = getattr(result, "html", None) or getattr(result, "cleaned_html", "") or ""
+        if html:
+            markdown = promote_markdown_headings(markdown, html)
+            markdown = inject_html_videos(markdown, html, entry.fetch_url)
+        markdown = normalize_markdown(
+            markdown,
+            clean=config.clean_markdown,
+            extra_noise_lines=config.noise_lines,
+        )
+        links = getattr(result, "links", {}) or {}
+        media = getattr(result, "media", {}) or {}
+        internal, external = _extract_page_links(links, entry.fetch_url, root_url, allowed_prefixes, config)
+        assets = _extract_page_assets(media, html, markdown, entry.fetch_url)
+
+        pages.append(
+            Page(
+                source_url=entry.fetch_url,
+                canonical_url=entry.canonical_url,
                 title=title,
                 description=repair_mojibake(metadata.get("description", "")),
                 markdown=markdown,
-                depth=depth,
-                parent_url=parent_url,
-                nav_parent_url=nav_parent_by_canonical.get(url),
-                nav_path=nav_path,
-                links_internal=_unique(internal),
-                links_external=_unique(external),
+                depth=entry.depth,
+                parent_url=entry.discovered_from_url,
+                nav_parent_url=entry.nav_parent_url,
+                nav_path=entry.nav_path or _extract_markdown_breadcrumb_path(markdown),
+                links_internal=internal,
+                links_external=external,
                 anchor_headings=extract_html_anchor_headings(html) if html else {},
                 assets=assets,
                 status_code=getattr(result, "status_code", 200) or 200,
             )
-            pages.append(page)
-            page_by_canonical[result_url] = page
-            if result_url != url:
-                page_by_canonical[url] = page
+        )
+    return pages, issues
 
-    return MirrorRun(pages=pages, issues=issues)
+
+async def _fetch_crawl_result(
+    crawler: object,
+    run_config: object,
+    fetch_url: str,
+    phase: str,
+) -> tuple[object | None, MirrorIssue | None]:
+    try:
+        result = await crawler.arun(url=fetch_url, config=run_config)
+    except Exception as exc:
+        return None, MirrorIssue(
+            kind=f"{phase}_fetch_exception",
+            message=str(exc),
+            url=fetch_url,
+            severity="error",
+        )
+    if not getattr(result, "success", False):
+        return None, MirrorIssue(
+            kind=f"{phase}_fetch_failed",
+            message=str(getattr(result, "error_message", "") or "Crawl4AI returned success=false."),
+            url=fetch_url,
+            severity="error",
+        )
+    return result, None
 
 
 def _remember_navigation_hint(
@@ -223,15 +303,13 @@ def _remember_navigation_hint(
         fetch_url_by_canonical.setdefault(target, target_fetch_url)
         return
 
-    nav_path = target_nav_path
-    nav_parent_url: str | None = None
-    if target != current_url:
-        if _nav_path_points_to_current_page(target_nav_path, current_title):
-            nav_parent_url = current_url
-            if link_text:
-                nav_path = (*target_nav_path, link_text)
-        elif _nav_path_points_to_current_page(target_nav_path[:-1], current_title):
-            nav_parent_url = current_url
+    nav_path, nav_parent_url = _navigation_hint(
+        target,
+        target_nav_path=target_nav_path,
+        link_text=link_text,
+        current_url=current_url,
+        current_title=current_title,
+    )
 
     should_update_nav = _prefer_nav_path(nav_path, nav_path_by_canonical.get(target))
     if should_update_nav:
@@ -251,12 +329,113 @@ def _remember_navigation_hint(
             page.nav_parent_url = nav_parent_url
 
 
+def _navigation_hint(
+    target: str,
+    *,
+    target_nav_path: tuple[str, ...],
+    link_text: str,
+    current_url: str,
+    current_title: str,
+) -> tuple[tuple[str, ...], str | None]:
+    if not target_nav_path:
+        return (), None
+    nav_path = target_nav_path
+    nav_parent_url: str | None = None
+    if target != current_url:
+        if _nav_path_points_to_current_page(target_nav_path, current_title):
+            nav_parent_url = current_url
+            if link_text:
+                nav_path = (*target_nav_path, link_text)
+        elif _nav_path_points_to_current_page(target_nav_path[:-1], current_title):
+            nav_parent_url = current_url
+    return nav_path, nav_parent_url
+
+
+def _link_tocpath(item: object, base_url: str) -> tuple[str, ...]:
+    href = item.get("href") if isinstance(item, dict) else None
+    return extract_tocpath(urljoin(base_url, href)) if href else ()
+
+
+def _navigation_depth(nav_path: tuple[str, ...], fallback: int) -> int:
+    if nav_path:
+        return max(0, len(nav_path) - 1)
+    return fallback
+
+
+def _sync_navigation_entry(
+    entry: NavigationEntry,
+    *,
+    fetch_url_by_canonical: dict[str, str],
+    nav_path_by_canonical: dict[str, tuple[str, ...]],
+    nav_parent_by_canonical: dict[str, str],
+) -> None:
+    entry.fetch_url = fetch_url_by_canonical.get(entry.canonical_url, entry.fetch_url)
+    entry.nav_path = nav_path_by_canonical.get(entry.canonical_url, entry.nav_path)
+    entry.nav_parent_url = nav_parent_by_canonical.get(entry.canonical_url, entry.nav_parent_url)
+    entry.depth = _navigation_depth(entry.nav_path, entry.depth)
+
+
 def _prefer_nav_path(candidate: tuple[str, ...], current: tuple[str, ...] | None) -> bool:
     if not candidate:
         return False
     if not current:
         return True
     return len(candidate) > len(current)
+
+
+def _extract_page_links(
+    links: object,
+    fetch_url: str,
+    root_url: str,
+    allowed_prefixes: tuple[str, ...],
+    config: MirrorConfig,
+) -> tuple[list[str], list[str]]:
+    internal: list[str] = []
+    external: list[str] = []
+    link_groups = links if isinstance(links, dict) else {}
+    for item in link_groups.get("internal", []):
+        href = item.get("href") if isinstance(item, dict) else None
+        if not href:
+            continue
+        target = canonicalize_url(urljoin(fetch_url, href))
+        if _is_allowed_url(target, root_url, allowed_prefixes, config):
+            internal.append(target)
+        else:
+            external.append(target)
+    for item in link_groups.get("external", []):
+        href = item.get("href") if isinstance(item, dict) else None
+        if href:
+            external.append(canonicalize_url(href, fetch_url))
+    return _unique(internal), _unique(external)
+
+
+def _extract_page_assets(
+    media: object,
+    html: str,
+    markdown: str,
+    fetch_url: str,
+) -> list[Asset]:
+    assets: list[Asset] = []
+    media_groups = media if isinstance(media, dict) else {}
+    for kind, items in media_groups.items():
+        asset_kind = "videos" if kind == "video" else kind
+        for item in items:
+            if isinstance(item, dict):
+                src = item.get("src") or item.get("href")
+                if src:
+                    assets.append(
+                        Asset(
+                            source=canonicalize_url(src, fetch_url),
+                            kind=asset_kind,
+                            alt=repair_mojibake(item.get("alt", "")),
+                        )
+                    )
+    if html:
+        for sources in extract_html_videos(html, fetch_url):
+            for source in sources:
+                assets.append(Asset(source=canonicalize_url(source, fetch_url), kind="videos"))
+
+    return merge_assets(assets, extract_markdown_assets(markdown, fetch_url))
 
 
 def _extract_markdown_breadcrumb_path(markdown: str) -> tuple[str, ...]:
@@ -287,8 +466,8 @@ def _nav_path_points_to_current_page(nav_path: tuple[str, ...], page_title: str)
 
 
 def _navigation_label_key(value: str) -> str:
-    value = re.split(r"\s+[–-]\s+", value, maxsplit=1)[0]
-    return re.sub(r"[^0-9a-zа-яё]+", "", value.lower().replace("\xa0", " "))
+    value = re.split(r"\s+[\u2013\u2014-]\s+", value, maxsplit=1)[0]
+    return re.sub(r"[^0-9a-z\u0430-\u044f\u0451]+", "", value.casefold().replace("\xa0", " "))
 
 
 def _validate_anti_bot_mode(mode: str) -> None:
