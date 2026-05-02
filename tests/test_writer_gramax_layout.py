@@ -309,6 +309,50 @@ def test_writer_removes_stale_catalog_page_when_nav_parent_changes(tmp_path: Pat
     assert (root / "docs" / "new" / "child.md").exists()
 
 
+def test_writer_preserves_other_mirrored_sections_between_runs(tmp_path: Path) -> None:
+    intro_url = "https://example.com/docs/sd/nsdpro/Content/introduction/introduction.htm"
+    change_url = "https://example.com/docs/sd/nsdpro/Content/Change_List/Change_List.htm"
+
+    root = write_mirror(
+        [
+            Page(
+                source_url=intro_url,
+                canonical_url=intro_url,
+                title="Introduction",
+                markdown="Intro.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=intro_url, out_dir=tmp_path),
+    )
+    intro_path = root / "docs" / "sd" / "nsdpro" / "content" / "introduction" / "introduction.md"
+
+    assert intro_path.exists()
+
+    write_mirror(
+        [
+            Page(
+                source_url=change_url,
+                canonical_url=change_url,
+                title="Change List",
+                markdown="Changes.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=change_url, out_dir=tmp_path),
+    )
+
+    pages_catalog = (root / "_catalog" / "pages.yaml").read_text(encoding="utf-8")
+    content_index = (root / "docs" / "sd" / "nsdpro" / "content" / "_index.yaml").read_text(encoding="utf-8")
+
+    assert intro_path.exists()
+    assert 'path: "docs/sd/nsdpro/content/introduction/introduction.md"' in pages_catalog
+    assert 'path: "docs/sd/nsdpro/content/change_list/change_list.md"' in pages_catalog
+    assert 'path: "introduction"' in content_index
+    assert 'path: "change_list"' in content_index
+    assert 'deleted:\n  []' in (root / "_catalog" / "sync.yaml").read_text(encoding="utf-8")
+
+
 def test_index_page_assets_stay_beside_index_file() -> None:
     page_relpath = PurePosixPath("docs/beta_35/_index.md")
     asset = Asset(source="https://example.com/assets/example.png", kind="images")

@@ -31,11 +31,18 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     root.mkdir(parents=True, exist_ok=True)
     catalog_dir = root / "_catalog"
     catalog_dir.mkdir(exist_ok=True)
-    previous_hashes = _read_previous_hashes(catalog_dir / "pages.yaml")
+    previous_pages = _read_catalog_items(catalog_dir / "pages.yaml", "pages")
+    previous_hashes = _catalog_hashes(previous_pages)
 
     child_urls_by_parent = _build_child_mapping(pages)
     path_by_url = _build_path_mapping(pages, config, child_urls_by_parent)
-    _remove_stale_catalog_pages(root, previous_hashes.keys(), path_by_url.values())
+    sync_roots = _sync_roots(path_by_url.values())
+    scoped_previous_hashes = {
+        path: content_hash
+        for path, content_hash in previous_hashes.items()
+        if _path_in_roots(path, sync_roots)
+    }
+    _remove_stale_catalog_pages(root, scoped_previous_hashes.keys(), path_by_url.values())
     order_by_url = _build_order_mapping(pages)
     nav_parent_by_url = _nav_parent_by_url(pages)
     anchor_headings_by_url = {page.canonical_url: page.anchor_headings for page in pages}
@@ -107,23 +114,42 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
                 }
             )
 
-    _write_folder_indexes(root, pages, path_by_url, order_by_url)
-    _write_doc_root_files(root, path_by_url)
-    sync_report = _sync_report(previous_hashes, written_pages, source=config.source, generated_at=now)
-    (catalog_dir / "pages.yaml").write_text(dumps_yaml({"pages": written_pages}), encoding="utf-8")
-    (catalog_dir / "links.yaml").write_text(dumps_yaml({"links": written_links}), encoding="utf-8")
-    (catalog_dir / "assets.yaml").write_text(dumps_yaml({"assets": written_assets}), encoding="utf-8")
-    (catalog_dir / "errors.yaml").write_text(dumps_yaml({"errors": written_errors}), encoding="utf-8")
+    merged_pages = _merge_catalog_items(previous_pages, written_pages, sync_roots, path_key="path")
+    merged_links = _merge_catalog_items(
+        _read_catalog_items(catalog_dir / "links.yaml", "links"),
+        written_links,
+        sync_roots,
+        path_key="from",
+    )
+    merged_assets = _merge_catalog_items(
+        _read_catalog_items(catalog_dir / "assets.yaml", "assets"),
+        written_assets,
+        sync_roots,
+        path_key="page",
+    )
+    merged_errors = _merge_catalog_items(
+        _read_catalog_items(catalog_dir / "errors.yaml", "errors"),
+        written_errors,
+        sync_roots,
+        path_key="path",
+    )
+    _write_folder_indexes_from_catalog(root, merged_pages)
+    _write_doc_root_files(root, [PurePosixPath(str(page["path"])) for page in merged_pages if page.get("path")])
+    sync_report = _sync_report(scoped_previous_hashes, written_pages, source=config.source, generated_at=now)
+    (catalog_dir / "pages.yaml").write_text(dumps_yaml({"pages": merged_pages}), encoding="utf-8")
+    (catalog_dir / "links.yaml").write_text(dumps_yaml({"links": merged_links}), encoding="utf-8")
+    (catalog_dir / "assets.yaml").write_text(dumps_yaml({"assets": merged_assets}), encoding="utf-8")
+    (catalog_dir / "errors.yaml").write_text(dumps_yaml({"errors": merged_errors}), encoding="utf-8")
     (catalog_dir / "sync.yaml").write_text(dumps_yaml(sync_report), encoding="utf-8")
     _append_sync_history(catalog_dir / "sync_history.yaml", sync_report)
     (catalog_dir / "summary.yaml").write_text(
         dumps_yaml(
             _catalog_summary(
                 root,
-                written_pages,
-                written_links,
-                written_assets,
-                written_errors,
+                merged_pages,
+                merged_links,
+                merged_assets,
+                merged_errors,
                 unresolved_internal_links,
                 sync_report,
             )
@@ -134,18 +160,51 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
 
 
 def _read_previous_hashes(path: Path) -> dict[str, str]:
+    return _catalog_hashes(_read_catalog_items(path, "pages"))
+
+
+def _catalog_hashes(pages: list[dict[str, object]]) -> dict[str, str]:
+    return {
+        str(page["path"]): str(page["content_hash"])
+        for page in pages
+        if page.get("path") and page.get("content_hash")
+    }
+
+
+def _read_catalog_items(path: Path, root_key: str) -> list[dict[str, object]]:
     if not path.exists():
-        return {}
-    hashes: dict[str, str] = {}
-    current_path: str | None = None
+        return []
+    items: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+    in_root = False
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not in_root:
+            in_root = line.strip() == f"{root_key}:"
+            continue
         stripped = line.strip()
-        if stripped.startswith("path: "):
-            current_path = _yaml_string_value(stripped.split(": ", 1)[1])
-        elif stripped.startswith("content_hash: ") and current_path:
-            hashes[current_path] = _yaml_string_value(stripped.split(": ", 1)[1])
-            current_path = None
-    return hashes
+        if stripped == "-":
+            if current:
+                items.append(current)
+            current = {}
+            continue
+        if not stripped or stripped in {"[]", "---"} or current is None or ": " not in stripped:
+            continue
+        key, value = stripped.split(": ", 1)
+        current[key] = _yaml_scalar_value(value)
+    if current:
+        items.append(current)
+    return items
+
+
+def _yaml_scalar_value(value: str) -> object:
+    value = value.strip()
+    if value == "null":
+        return None
+    if value == "[]":
+        return []
+    if re.fullmatch(r"-?\d+", value):
+        return int(value)
+    return _yaml_string_value(value)
 
 
 def _yaml_string_value(value: str) -> str:
@@ -415,6 +474,43 @@ def _remove_stale_catalog_pages(root: Path, previous_paths: object, current_path
         _remove_empty_parents(stale.parent, root)
 
 
+def _merge_catalog_items(
+    previous: list[dict[str, object]],
+    current: list[dict[str, object]],
+    sync_roots: tuple[PurePosixPath, ...],
+    *,
+    path_key: str,
+) -> list[dict[str, object]]:
+    preserved = [
+        item
+        for item in previous
+        if not _path_in_roots(str(item.get(path_key) or ""), sync_roots)
+    ]
+    return [*preserved, *current]
+
+
+def _sync_roots(paths: object) -> tuple[PurePosixPath, ...]:
+    roots: set[PurePosixPath] = set()
+    for path in paths:
+        if not isinstance(path, PurePosixPath):
+            continue
+        parts = path.parts
+        for index, part in enumerate(parts[:-1]):
+            if part.lower() == "content" and index + 1 < len(parts):
+                roots.add(PurePosixPath(*parts[: index + 2]))
+                break
+        else:
+            roots.add(PurePosixPath(parts[0]) if parts else PurePosixPath("."))
+    return tuple(sorted(roots, key=str))
+
+
+def _path_in_roots(path: str, roots: tuple[PurePosixPath, ...]) -> bool:
+    if not path:
+        return False
+    relpath = PurePosixPath(path)
+    return any(_is_relative_to(relpath, root) for root in roots)
+
+
 def _unlink_file(path: Path) -> None:
     try:
         if path.is_file():
@@ -535,8 +631,58 @@ def _write_folder_indexes(
         (folder_path / "_index.yaml").write_text(dumps_yaml(payload), encoding="utf-8")
 
 
-def _write_doc_root_files(root: Path, path_by_url: dict[str, PurePosixPath]) -> None:
-    for doc_root in _doc_root_folders(path_by_url.values()):
+def _write_folder_indexes_from_catalog(root: Path, pages: list[dict[str, object]]) -> None:
+    folders: dict[PurePosixPath, list[dict[str, object]]] = defaultdict(list)
+    for page in pages:
+        path = page.get("path")
+        if not isinstance(path, str):
+            continue
+        relpath = PurePosixPath(path)
+        folders[relpath.parent].append(page)
+
+    all_folders = set(folders)
+    for folder in list(all_folders):
+        current = folder
+        while str(current) != ".":
+            current = current.parent
+            all_folders.add(current)
+
+    for folder in sorted(all_folders, key=lambda item: str(item)):
+        folder_path = root if str(folder) == "." else root / Path(*folder.parts)
+        folder_path.mkdir(parents=True, exist_ok=True)
+        child_dirs = sorted(
+            str(candidate.relative_to(folder))
+            for candidate in all_folders
+            if candidate != folder and candidate.parent == folder
+        )
+        folder_pages = sorted(
+            folders.get(folder, []),
+            key=lambda page: (int(page.get("order") or 0), str(page.get("path") or "")),
+        )
+        payload = {
+            "path": "" if str(folder) == "." else str(folder),
+            "title": _folder_title(folder),
+            "summary": "",
+            "children": [{"path": child, "title": _folder_title(PurePosixPath(child))} for child in child_dirs],
+            "pages": [
+                {
+                    "file": PurePosixPath(str(page["path"])).name,
+                    "path": str(page["path"]),
+                    "title": page.get("title", ""),
+                    "source_url": page.get("source_url", ""),
+                    "order": page.get("order", 0),
+                    "tags": page.get("tags", []),
+                }
+                for page in folder_pages
+                if page.get("path")
+            ],
+            "keywords": sorted({word for page in folder_pages for word in _keywords(str(page.get("title") or ""))}),
+        }
+        (folder_path / "_index.yaml").write_text(dumps_yaml(payload), encoding="utf-8")
+
+
+def _write_doc_root_files(root: Path, paths: object) -> None:
+    for doc_root in _doc_root_folders(paths):
         folder_path = root if str(doc_root) == "." else root / Path(*doc_root.parts)
         folder_path.mkdir(parents=True, exist_ok=True)
         doc_root_path = folder_path / DOC_ROOT_FILENAME
