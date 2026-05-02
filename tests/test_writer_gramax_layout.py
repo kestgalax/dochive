@@ -252,6 +252,63 @@ def test_writer_removes_stale_flat_page_when_it_becomes_index(tmp_path: Path) ->
     assert (root / "docs" / "quickstart" / "6" / "work_portal.md").exists()
 
 
+def test_writer_removes_stale_catalog_page_when_nav_parent_changes(tmp_path: Path) -> None:
+    source_url = "https://example.com/docs/root.htm"
+    old_parent_url = "https://example.com/docs/old.htm"
+    new_parent_url = "https://example.com/docs/new.htm"
+    child_url = "https://example.com/docs/child.htm"
+
+    root = write_mirror(
+        [
+            Page(
+                source_url=old_parent_url,
+                canonical_url=old_parent_url,
+                title="Old",
+                markdown=f"[Child]({child_url})\n",
+                depth=0,
+                links_internal=[child_url],
+            ),
+            Page(
+                source_url=child_url,
+                canonical_url=child_url,
+                title="Child",
+                markdown="Child.\n",
+                depth=1,
+                nav_parent_url=old_parent_url,
+            ),
+        ],
+        MirrorConfig(source=source_url, out_dir=tmp_path),
+    )
+    old_child_path = root / "docs" / "old" / "child.md"
+
+    assert old_child_path.exists()
+
+    write_mirror(
+        [
+            Page(
+                source_url=new_parent_url,
+                canonical_url=new_parent_url,
+                title="New",
+                markdown=f"[Child]({child_url})\n",
+                depth=0,
+                links_internal=[child_url],
+            ),
+            Page(
+                source_url=child_url,
+                canonical_url=child_url,
+                title="Child",
+                markdown="Child.\n",
+                depth=1,
+                nav_parent_url=new_parent_url,
+            ),
+        ],
+        MirrorConfig(source=source_url, out_dir=tmp_path),
+    )
+
+    assert not old_child_path.exists()
+    assert (root / "docs" / "new" / "child.md").exists()
+
+
 def test_index_page_assets_stay_beside_index_file() -> None:
     page_relpath = PurePosixPath("docs/beta_35/_index.md")
     asset = Asset(source="https://example.com/assets/example.png", kind="images")

@@ -35,6 +35,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
 
     child_urls_by_parent = _build_child_mapping(pages)
     path_by_url = _build_path_mapping(pages, config, child_urls_by_parent)
+    _remove_stale_catalog_pages(root, previous_hashes.keys(), path_by_url.values())
     order_by_url = _build_order_mapping(pages)
     nav_parent_by_url = _nav_parent_by_url(pages)
     anchor_headings_by_url = {page.canonical_url: page.anchor_headings for page in pages}
@@ -390,6 +391,26 @@ def _remove_stale_page_alternates(root: Path, relpath: PurePosixPath) -> None:
         return
     if relpath.suffix.lower() == ".md":
         stale = root / Path(*relpath.parent.parts, relpath.stem, "_index.md")
+        _unlink_file(stale)
+        _remove_empty_parents(stale.parent, root)
+
+
+def _remove_stale_catalog_pages(root: Path, previous_paths: object, current_paths: object) -> None:
+    current = {str(path) for path in current_paths}
+    root_resolved = root.resolve()
+    for previous in previous_paths:
+        if not isinstance(previous, str) or previous in current:
+            continue
+        relpath = PurePosixPath(previous)
+        if relpath.suffix.lower() != ".md":
+            continue
+        stale = root / Path(*relpath.parts)
+        try:
+            stale_resolved = stale.resolve()
+        except OSError:
+            continue
+        if stale_resolved != root_resolved and root_resolved not in stale_resolved.parents:
+            continue
         _unlink_file(stale)
         _remove_empty_parents(stale.parent, root)
 

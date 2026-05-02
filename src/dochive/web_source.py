@@ -54,6 +54,7 @@ async def _crawl_web_async(config: MirrorConfig) -> list[Page]:
     nav_parent_by_canonical: dict[str, str] = {}
     seen: set[str] = set()
     pages: list[Page] = []
+    page_by_canonical: dict[str, Page] = {}
     issues: list[MirrorIssue] = []
 
     browser_config_kwargs: dict[str, object] = {"headless": True}
@@ -136,18 +137,18 @@ async def _crawl_web_async(config: MirrorConfig) -> list[Page]:
                 target_nav_path = extract_tocpath(target_fetch_url)
                 if _is_allowed_url(target, root_url, allowed_prefixes, config):
                     internal.append(target)
-                    if target_nav_path:
-                        if target != url:
-                            if _nav_path_points_to_current_page(target_nav_path, title):
-                                nav_parent_by_canonical[target] = url
-                                if link_text:
-                                    target_nav_path = (*target_nav_path, link_text)
-                            elif _nav_path_points_to_current_page(target_nav_path[:-1], title):
-                                nav_parent_by_canonical[target] = url
-                        nav_path_by_canonical[target] = target_nav_path
-                        fetch_url_by_canonical[target] = target_fetch_url
-                    elif target not in fetch_url_by_canonical:
-                        fetch_url_by_canonical[target] = target_fetch_url
+                    _remember_navigation_hint(
+                        target,
+                        target_fetch_url=target_fetch_url,
+                        target_nav_path=target_nav_path,
+                        link_text=link_text,
+                        current_url=url,
+                        current_title=title,
+                        fetch_url_by_canonical=fetch_url_by_canonical,
+                        nav_path_by_canonical=nav_path_by_canonical,
+                        nav_parent_by_canonical=nav_parent_by_canonical,
+                        page_by_canonical=page_by_canonical,
+                    )
                     if target not in seen and depth + 1 <= config.max_depth:
                         queue.append((target, depth + 1, url))
                 else:
@@ -181,26 +182,81 @@ async def _crawl_web_async(config: MirrorConfig) -> list[Page]:
             result_url = canonicalize_url(getattr(result, "url", url))
             nav_path = nav_path_by_canonical.get(url) or _extract_markdown_breadcrumb_path(markdown)
 
-            pages.append(
-                Page(
-                    source_url=fetch_url,
-                    canonical_url=result_url,
-                    title=title,
-                    description=repair_mojibake(metadata.get("description", "")),
-                    markdown=markdown,
-                    depth=depth,
-                    parent_url=parent_url,
-                    nav_parent_url=nav_parent_by_canonical.get(url),
-                    nav_path=nav_path,
-                    links_internal=_unique(internal),
-                    links_external=_unique(external),
-                    anchor_headings=extract_html_anchor_headings(html) if html else {},
-                    assets=assets,
-                    status_code=getattr(result, "status_code", 200) or 200,
-                )
+            page = Page(
+                source_url=fetch_url_by_canonical.get(url, fetch_url),
+                canonical_url=result_url,
+                title=title,
+                description=repair_mojibake(metadata.get("description", "")),
+                markdown=markdown,
+                depth=depth,
+                parent_url=parent_url,
+                nav_parent_url=nav_parent_by_canonical.get(url),
+                nav_path=nav_path,
+                links_internal=_unique(internal),
+                links_external=_unique(external),
+                anchor_headings=extract_html_anchor_headings(html) if html else {},
+                assets=assets,
+                status_code=getattr(result, "status_code", 200) or 200,
             )
+            pages.append(page)
+            page_by_canonical[result_url] = page
+            if result_url != url:
+                page_by_canonical[url] = page
 
     return MirrorRun(pages=pages, issues=issues)
+
+
+def _remember_navigation_hint(
+    target: str,
+    *,
+    target_fetch_url: str,
+    target_nav_path: tuple[str, ...],
+    link_text: str,
+    current_url: str,
+    current_title: str,
+    fetch_url_by_canonical: dict[str, str],
+    nav_path_by_canonical: dict[str, tuple[str, ...]],
+    nav_parent_by_canonical: dict[str, str],
+    page_by_canonical: dict[str, Page],
+) -> None:
+    if not target_nav_path:
+        fetch_url_by_canonical.setdefault(target, target_fetch_url)
+        return
+
+    nav_path = target_nav_path
+    nav_parent_url: str | None = None
+    if target != current_url:
+        if _nav_path_points_to_current_page(target_nav_path, current_title):
+            nav_parent_url = current_url
+            if link_text:
+                nav_path = (*target_nav_path, link_text)
+        elif _nav_path_points_to_current_page(target_nav_path[:-1], current_title):
+            nav_parent_url = current_url
+
+    should_update_nav = _prefer_nav_path(nav_path, nav_path_by_canonical.get(target))
+    if should_update_nav:
+        nav_path_by_canonical[target] = nav_path
+        if page := page_by_canonical.get(target):
+            page.nav_path = nav_path
+
+    should_update_fetch_url = should_update_nav or not extract_tocpath(fetch_url_by_canonical.get(target, ""))
+    if should_update_fetch_url:
+        fetch_url_by_canonical[target] = target_fetch_url
+        if page := page_by_canonical.get(target):
+            page.source_url = target_fetch_url
+
+    if nav_parent_url and (target not in nav_parent_by_canonical or should_update_nav):
+        nav_parent_by_canonical[target] = nav_parent_url
+        if page := page_by_canonical.get(target):
+            page.nav_parent_url = nav_parent_url
+
+
+def _prefer_nav_path(candidate: tuple[str, ...], current: tuple[str, ...] | None) -> bool:
+    if not candidate:
+        return False
+    if not current:
+        return True
+    return len(candidate) > len(current)
 
 
 def _extract_markdown_breadcrumb_path(markdown: str) -> tuple[str, ...]:
