@@ -117,6 +117,20 @@ export PLAYWRIGHT_BROWSERS_PATH="$PWD/.playwright-browsers"
 export PYTHONIOENCODING="utf-8"
 ```
 
+## Discover Web Structure
+
+For web documentation with a stable navigation tree, build the structure before mirroring content:
+
+```bash
+dochive structure \
+  --source "https://docs.example.com/start.htm" \
+  --out ./mirror \
+  --max-depth 3 \
+  --scope subtree
+```
+
+The command writes `_catalog/structure.yaml` under the mirror root. It stores known source URLs, navigation paths, parent links, order, placeholder status, and final Gramax paths. Later `dochive mirror` runs against the same output directory reuse this file: missing pages remain placeholders, and separately mirrored sections fill the existing paths instead of creating a second layout.
+
 ## Mirror Local HTML
 
 Examples below use PowerShell line continuations. On Linux or macOS, use the same options in one line or replace trailing backticks with `\`.
@@ -320,6 +334,7 @@ Important files:
 _catalog/summary.yaml
 _catalog/sync.yaml
 _catalog/sync_history.yaml
+_catalog/structure.yaml
 _catalog/pages.yaml
 _catalog/links.yaml
 _catalog/assets.yaml

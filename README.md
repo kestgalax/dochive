@@ -59,8 +59,11 @@ For web crawling, install the optional Crawl4AI extra and Playwright browsers:
 ```bash
 python -m pip install -e ".[crawl4ai]"
 playwright install chromium
+dochive structure --source https://docs.example.com --out ./mirror --max-depth 3
 dochive mirror --source https://docs.example.com --out ./mirror --render-js
 ```
+
+`dochive structure` saves `_catalog/structure.yaml` with the known navigation tree and final Gramax paths. Later `mirror` runs reuse that structure, keeping placeholders stable until each section is mirrored.
 
 During development, editable installation keeps the `dochive` console command pointed at the current `src/` code. You can also run the package module directly from the repository root:
 

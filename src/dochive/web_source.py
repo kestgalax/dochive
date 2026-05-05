@@ -11,9 +11,9 @@ from urllib.parse import urljoin, urlparse
 from .html_extract import extract_html_anchor_headings, extract_html_videos, inject_html_videos, promote_markdown_headings
 from .markdown_normalizer import normalize_markdown
 from .media_utils import extract_markdown_assets, merge_assets
-from .models import Asset, MirrorConfig, MirrorIssue, MirrorRun, Page
+from .models import Asset, MirrorConfig, MirrorIssue, MirrorRun, Page, StructureEntry, StructureRun
 from .text_utils import repair_mojibake
-from .url_utils import canonicalize_url, extract_tocpath, same_domain
+from .url_utils import HTML_SUFFIXES, canonicalize_url, extract_tocpath, same_domain
 
 MARKDOWN_BREADCRUMB_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)|([^>\n]+)")
 
@@ -40,6 +40,18 @@ def crawl_web(config: MirrorConfig) -> MirrorRun:
             "or pass a local HTML folder to --source."
         ) from exc
     return asyncio.run(_crawl_web_async(config))
+
+
+def build_web_structure(config: MirrorConfig) -> StructureRun:
+    _configure_crawl4ai_environment(config)
+    try:
+        import crawl4ai  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError(
+            "Web structure discovery requires Crawl4AI. Install with `pip install .[crawl4ai]` "
+            "or use `dochive mirror` with a local HTML folder."
+        ) from exc
+    return asyncio.run(_build_web_structure_async(config))
 
 
 def _configure_crawl4ai_environment(config: MirrorConfig) -> None:
@@ -107,6 +119,63 @@ async def _crawl_web_async(config: MirrorConfig) -> list[Page]:
     return MirrorRun(pages=pages, issues=issues)
 
 
+async def _build_web_structure_async(config: MirrorConfig) -> StructureRun:
+    from crawl4ai import AsyncWebCrawler
+    from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig
+
+    _validate_anti_bot_mode(config.anti_bot_mode)
+
+    root_fetch_url = _structure_root_fetch_url(config.source)
+    root_url = canonicalize_url(root_fetch_url)
+    allowed_prefixes = _allowed_prefixes(root_url, config)
+    root_nav_path = extract_tocpath(root_fetch_url)
+
+    browser_config_kwargs: dict[str, object] = {"headless": True}
+    run_config_kwargs: dict[str, object] = {}
+    if config.anti_bot_mode == "basic":
+        browser_config_kwargs["user_agent_mode"] = "random"
+        run_config_kwargs.update(
+            simulate_user=True,
+            override_navigator=True,
+            magic=True,
+        )
+
+    browser_config = BrowserConfig(**browser_config_kwargs)
+    run_config = CrawlerRunConfig(
+        css_selector=config.content_selector,
+        excluded_selector=config.exclude_selector,
+        excluded_tags=list(config.exclude_tags),
+        remove_forms=True,
+        check_robots_txt=False,
+        **run_config_kwargs,
+    )
+
+    async with AsyncWebCrawler(config=browser_config) as crawler:
+        nav_index, issues = await _build_navigation_index(
+            crawler,
+            run_config,
+            config,
+            root_url=root_url,
+            root_fetch_url=root_fetch_url,
+            root_nav_path=root_nav_path,
+            allowed_prefixes=allowed_prefixes,
+        )
+
+    return StructureRun(entries=_navigation_entries_to_structure(nav_index, root_url=root_url), issues=issues)
+
+
+def _structure_root_fetch_url(source: str) -> str:
+    parsed = urlparse(source)
+    parts = [part for part in parsed.path.split("/") if part]
+    lowered = [part.lower() for part in parts]
+    if "content" not in lowered or _is_main_page_url(source):
+        return source
+    content_index = lowered.index("content")
+    root_parts = parts[: content_index + 1] + ["main_page.htm"]
+    root_path = "/" + "/".join(root_parts)
+    return parsed._replace(path=root_path, params="", query="", fragment="").geturl()
+
+
 async def _build_navigation_index(
     crawler: object,
     run_config: object,
@@ -159,6 +228,8 @@ async def _build_navigation_index(
             target = canonicalize_url(target_fetch_url)
             if target == url:
                 continue
+            if not _is_html_page_candidate(target):
+                continue
             if not _is_allowed_url(target, root_url, allowed_prefixes, config):
                 _remember_placeholder_entry(
                     entries,
@@ -172,6 +243,8 @@ async def _build_navigation_index(
                 continue
 
             target_nav_path = extract_tocpath(target_fetch_url)
+            if _is_synthetic_root_link(entry, root_url):
+                target_nav_path = _synthetic_root_nav_path(target_nav_path, link_text, target)
             nav_path, nav_parent_url = _navigation_hint(
                 target,
                 target_nav_path=target_nav_path,
@@ -199,7 +272,8 @@ async def _build_navigation_index(
                     depth=depth,
                     order=len(entries) + 1,
                     discovered_from_url=url,
-                    nav_parent_url=url if not target_nav_path else None,
+                    nav_parent_url=None if _is_synthetic_root_link(entry, root_url) else url if not target_nav_path else None,
+                    nav_path=_plain_link_nav_path(entry.nav_path, link_text, target) if not target_nav_path else (),
                 )
 
             _remember_navigation_hint(
@@ -314,6 +388,35 @@ async def _fetch_pages_from_navigation_index(
     return pages, issues
 
 
+def _navigation_entries_to_structure(
+    nav_index: dict[str, NavigationEntry],
+    *,
+    root_url: str | None = None,
+) -> list[StructureEntry]:
+    synthetic_root = root_url if root_url and _is_main_page_url(root_url) else None
+    return [
+        StructureEntry(
+            canonical_url=entry.canonical_url,
+            fetch_url=entry.fetch_url,
+            title=_structure_title(entry),
+            depth=entry.depth,
+            order=entry.order,
+            nav_parent_url=None if entry.nav_parent_url == synthetic_root else entry.nav_parent_url,
+            nav_path=entry.nav_path,
+            placeholder=True,
+        )
+        for entry in sorted(nav_index.values(), key=lambda item: item.order)
+        if not _is_synthetic_structure_root(entry, root_url)
+    ]
+
+
+def _structure_title(entry: NavigationEntry) -> str:
+    if entry.nav_path:
+        return entry.nav_path[-1]
+    stem = Path(urlparse(entry.canonical_url).path).stem
+    return stem.replace("-", " ").replace("_", " ").title() or entry.canonical_url.rsplit("/", 1)[-1]
+
+
 async def _fetch_crawl_result(
     crawler: object,
     run_config: object,
@@ -353,6 +456,19 @@ def _remember_navigation_hint(
     page_by_canonical: dict[str, Page],
 ) -> None:
     if not target_nav_path:
+        if current_url and link_text:
+            nav_parent_by_canonical.setdefault(target, current_url)
+            if target not in nav_path_by_canonical:
+                parent_path = nav_path_by_canonical.get(current_url) or next(
+                    (
+                        page.nav_path
+                        for page in page_by_canonical.values()
+                        if page.canonical_url == current_url and page.nav_path
+                    ),
+                    (),
+                )
+                if parent_path:
+                    nav_path_by_canonical[target] = _plain_link_nav_path(parent_path, link_text, target)
         fetch_url_by_canonical.setdefault(target, target_fetch_url)
         return
 
@@ -364,7 +480,10 @@ def _remember_navigation_hint(
         current_title=current_title,
     )
 
+    pinned_section_landing = _is_pinned_section_landing_path(target, nav_path_by_canonical.get(target))
     should_update_nav = _prefer_nav_path(nav_path, nav_path_by_canonical.get(target))
+    if pinned_section_landing:
+        should_update_nav = False
     if should_update_nav:
         nav_path_by_canonical[target] = nav_path
         if page := page_by_canonical.get(target):
@@ -376,7 +495,7 @@ def _remember_navigation_hint(
         if page := page_by_canonical.get(target):
             page.source_url = target_fetch_url
 
-    if nav_parent_url and (target not in nav_parent_by_canonical or should_update_nav):
+    if nav_parent_url and not pinned_section_landing and (target not in nav_parent_by_canonical or should_update_nav):
         nav_parent_by_canonical[target] = nav_parent_url
         if page := page_by_canonical.get(target):
             page.nav_parent_url = nav_parent_url
@@ -397,7 +516,7 @@ def _remember_placeholder_entry(
     nav_path = target_nav_path
     if not nav_path:
         title = _placeholder_title(link_text, target)
-        nav_path = (_url_section_label(target), title)
+        nav_path = _plain_link_nav_path(current_entry.nav_path, link_text, target) or (_url_section_label(target), title)
     else:
         title = nav_path[-1]
     entries[target] = NavigationEntry(
@@ -410,6 +529,65 @@ def _remember_placeholder_entry(
         nav_path=nav_path,
         placeholder=True,
     )
+
+
+def _plain_link_nav_path(parent_nav_path: tuple[str, ...], link_text: str, target: str) -> tuple[str, ...]:
+    if not parent_nav_path:
+        return ()
+    title = _placeholder_title(link_text, target)
+    return (*parent_nav_path, title)
+
+
+def _is_synthetic_root_link(entry: NavigationEntry, root_url: str) -> bool:
+    return entry.canonical_url == root_url and _is_main_page_url(root_url) and not entry.nav_path
+
+
+def _synthetic_root_nav_path(
+    target_nav_path: tuple[str, ...],
+    link_text: str,
+    target: str,
+) -> tuple[str, ...]:
+    if target_nav_path and not _is_section_landing_page(target):
+        return target_nav_path
+    if target_nav_path:
+        return (target_nav_path[-1],)
+    return (_placeholder_title(link_text, target),)
+
+
+def _is_pinned_section_landing_path(target: str, current: tuple[str, ...] | None) -> bool:
+    return bool(current and len(current) == 1 and _is_section_landing_page(target))
+
+
+def _is_section_landing_page(target: str) -> bool:
+    parts = [part for part in urlparse(target).path.strip("/").split("/") if part]
+    lowered = [part.lower() for part in parts]
+    if "content" in lowered:
+        after_content = parts[lowered.index("content") + 1 :]
+    else:
+        after_content = parts
+    if len(after_content) == 1:
+        return True
+    if len(after_content) < 2:
+        return False
+    parent = Path(after_content[-2]).stem.casefold()
+    stem = Path(after_content[-1]).stem.casefold()
+    return stem == parent or stem.endswith("_toc")
+
+
+def _is_synthetic_structure_root(entry: NavigationEntry, root_url: str | None) -> bool:
+    return bool(root_url and entry.canonical_url == root_url and _is_main_page_url(root_url) and not entry.nav_path)
+
+
+def _is_main_page_url(url: str) -> bool:
+    return Path(urlparse(url).path).name.lower() in {"main_page.htm", "main_page.html", "main_page.xhtml"}
+
+
+def _is_html_page_candidate(url: str) -> bool:
+    path = urlparse(url).path
+    suffix = Path(path).suffix.lower()
+    if suffix:
+        return suffix in HTML_SUFFIXES
+    return True
 
 
 def _is_placeholder_candidate(target: str, root_url: str) -> bool:

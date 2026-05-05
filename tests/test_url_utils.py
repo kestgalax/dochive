@@ -3,7 +3,13 @@ from pathlib import Path
 
 from dochive.models import MirrorConfig
 from dochive.models import Page
-from dochive.web_source import _build_navigation_index, _nav_path_points_to_current_page, _remember_navigation_hint
+from dochive.web_source import (
+    _build_navigation_index,
+    _nav_path_points_to_current_page,
+    _navigation_entries_to_structure,
+    _remember_navigation_hint,
+    _structure_root_fetch_url,
+)
 from dochive.url_utils import canonicalize_url, extract_tocpath
 
 
@@ -37,6 +43,21 @@ def test_extract_tocpath_accepts_madcap_query_casing() -> None:
     url = "https://example.com/docs/step.htm?TocPath=Quick%20Start%7C_____1"
 
     assert extract_tocpath(url) == ("Quick Start",)
+
+
+def test_structure_root_fetch_url_uses_madcap_main_page() -> None:
+    source = (
+        "https://www.naumen.ru/docs/sd/nsdpro/Content/introduction/introduction.htm"
+        "?tocpath=Intro%7C_____0"
+    )
+
+    assert _structure_root_fetch_url(source) == "https://www.naumen.ru/docs/sd/nsdpro/Content/main_page.htm"
+
+
+def test_structure_root_fetch_url_keeps_existing_main_page() -> None:
+    source = "https://www.naumen.ru/docs/sd/nsdpro/Content/main_page.htm"
+
+    assert _structure_root_fetch_url(source) == source
 
 
 def test_navigation_label_match_ignores_site_suffix_and_spacing() -> None:
@@ -184,6 +205,191 @@ def test_navigation_index_is_built_before_content_fetch_and_upgrades_plain_link(
     assert entries[child_url].depth == 2
 
 
+def test_navigation_index_exports_structure_entries_with_titles() -> None:
+    root_url = "https://example.com/docs/root.htm"
+    child_url = "https://example.com/docs/child.htm"
+    child_fetch_url = f"{child_url}?tocpath=Root%7CChild%7C_____0"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult("Root - Naumen SD Pro", [{"href": child_fetch_url, "text": "Child"}]),
+            child_fetch_url: FakeCrawlResult("Child - Naumen SD Pro", []),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=("Root",),
+            allowed_prefixes=("https://example.com/docs/",),
+        )
+    )
+
+    structure = _navigation_entries_to_structure(entries)
+
+    assert issues == []
+    assert structure[0].canonical_url == root_url
+    assert structure[0].title == "Root"
+    assert structure[1].canonical_url == child_url
+    assert structure[1].fetch_url == child_fetch_url
+    assert structure[1].title == "Child"
+    assert structure[1].placeholder is True
+
+
+def test_navigation_structure_skips_synthetic_main_page_root() -> None:
+    root_url = "https://example.com/docs/main_page.htm"
+    intro_url = "https://example.com/docs/intro.htm"
+    intro_fetch_url = f"{intro_url}?tocpath=Intro%7C_____0"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult("Main - Naumen SD Pro", [{"href": intro_fetch_url, "text": "Intro"}]),
+            intro_fetch_url: FakeCrawlResult("Intro - Naumen SD Pro", []),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=(),
+            allowed_prefixes=("https://example.com/docs/",),
+        )
+    )
+
+    structure = _navigation_entries_to_structure(entries, root_url=root_url)
+
+    assert issues == []
+    assert [entry.canonical_url for entry in structure] == [intro_url]
+    assert structure[0].nav_path == ("Intro",)
+
+
+def test_navigation_structure_drops_synthetic_main_page_parent() -> None:
+    root_url = "https://example.com/docs/main_page.htm"
+    child_url = "https://example.com/docs/child.htm"
+    child_fetch_url = f"{child_url}?tocpath=Child%7C_____0"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult("Main - Naumen SD Pro", [{"href": child_fetch_url, "text": "Child"}]),
+            child_fetch_url: FakeCrawlResult("Child - Naumen SD Pro", []),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=(),
+            allowed_prefixes=("https://example.com/docs/",),
+        )
+    )
+
+    entries[child_url].nav_parent_url = root_url
+    structure = _navigation_entries_to_structure(entries, root_url=root_url)
+
+    assert issues == []
+    assert structure[0].canonical_url == child_url
+    assert structure[0].nav_parent_url is None
+
+
+def test_navigation_index_keeps_main_page_section_landings_top_level() -> None:
+    root_url = "https://example.com/docs/main_page.htm"
+    admin_url = "https://example.com/docs/admin_applied/admin_applied.htm"
+    intro_url = "https://example.com/docs/introduction/introduction.htm"
+    admin_fetch_url = f"{admin_url}?tocpath=Intro%7CAdmin%7C_____0"
+    intro_fetch_url = f"{intro_url}?tocpath=Intro%7C_____0"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult(
+                "Main - Naumen SD Pro",
+                [
+                    {"href": admin_fetch_url, "text": "Admin"},
+                    {"href": intro_fetch_url, "text": "Intro"},
+                ],
+            ),
+            admin_fetch_url: FakeCrawlResult("Admin - Naumen SD Pro", []),
+            intro_fetch_url: FakeCrawlResult("Intro - Naumen SD Pro", [{"href": admin_fetch_url, "text": "Admin"}]),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=(),
+            allowed_prefixes=("https://example.com/docs/",),
+        )
+    )
+
+    assert issues == []
+    assert entries[admin_url].nav_parent_url is None
+    assert entries[admin_url].nav_path == ("Admin",)
+
+
+def test_navigation_index_preserves_deep_tocpath_for_main_page_shortcuts() -> None:
+    root_url = "https://example.com/docs/main_page.htm"
+    portal_url = "https://example.com/docs/QuickStartSDPro/work_portal.htm"
+    portal_fetch_url = f"{portal_url}?tocpath=Quick%20Start%7CStep%206%7CPortal%7C_____0"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult("Main - Naumen SD Pro", [{"href": portal_fetch_url, "text": "Portal"}]),
+            portal_fetch_url: FakeCrawlResult("Portal - Naumen SD Pro", []),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=(),
+            allowed_prefixes=("https://example.com/docs/",),
+        )
+    )
+
+    assert issues == []
+    assert entries[portal_url].nav_parent_url is None
+    assert entries[portal_url].nav_path == ("Quick Start", "Step 6", "Portal")
+
+
+def test_navigation_index_ignores_non_html_page_targets() -> None:
+    root_url = "https://example.com/docs/main_page.htm"
+    image_url = "https://example.com/docs/Resources/Images/process_list.png"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult("Main - Naumen SD Pro", [{"href": image_url, "text": "Process List"}]),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=(),
+            allowed_prefixes=("https://example.com/docs/",),
+        )
+    )
+
+    assert issues == []
+    assert image_url not in entries
+
+
 def test_navigation_index_prioritizes_tocpath_links_for_page_limit() -> None:
     root_url = "https://example.com/docs/root.htm"
     context_url = "https://example.com/docs/context.htm"
@@ -251,6 +457,36 @@ def test_navigation_index_adds_plain_links_within_allowed_scope() -> None:
     assert entries[old_url].nav_parent_url == root_url
 
 
+def test_navigation_index_plain_link_inherits_parent_nav_path() -> None:
+    root_url = "https://example.com/docs/root.htm"
+    child_url = "https://example.com/docs/child.htm"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult(
+                "Root - Naumen SD Pro",
+                [{"href": child_url, "text": "Child Page"}],
+            ),
+            child_url: FakeCrawlResult("Child page - Naumen SD Pro", []),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=("Root",),
+            allowed_prefixes=("https://example.com/docs/",),
+        )
+    )
+
+    assert issues == []
+    assert entries[child_url].nav_parent_url == root_url
+    assert entries[child_url].nav_path == ("Root", "Child Page")
+
+
 def test_navigation_index_self_link_does_not_change_root_depth() -> None:
     root_url = "https://example.com/docs/root.htm"
     root_fetch_url = f"{root_url}?tocpath=Root%7CSection%7C_____0"
@@ -310,7 +546,7 @@ def test_navigation_index_creates_placeholder_for_nav_link_outside_scope() -> No
 
     assert issues == []
     assert entries[change_url].placeholder is True
-    assert entries[change_url].nav_path == ("Change List", "Change List")
+    assert entries[change_url].nav_path == ("Introduction", "Change List")
     assert entries[change_url].nav_parent_url is None
     assert main_url not in entries
 
@@ -341,7 +577,7 @@ def test_navigation_index_plain_context_placeholder_uses_url_section_not_current
 
     assert issues == []
     assert entries[target_url].placeholder is True
-    assert entries[target_url].nav_path == ("Spm Role", "Service Category Owner")
+    assert entries[target_url].nav_path == ("Introduction", "Change List", "Archive", "Service Category Owner")
     assert entries[target_url].nav_parent_url is None
 
 

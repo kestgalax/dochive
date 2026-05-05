@@ -61,6 +61,25 @@ class MirrorRun:
     issues: list[MirrorIssue] = field(default_factory=list)
 
 
+@dataclass
+class StructureEntry:
+    canonical_url: str
+    fetch_url: str
+    title: str
+    depth: int
+    order: int
+    nav_parent_url: str | None = None
+    nav_path: tuple[str, ...] = ()
+    placeholder: bool = True
+    path: str | None = None
+
+
+@dataclass
+class StructureRun:
+    entries: list[StructureEntry] = field(default_factory=list)
+    issues: list[MirrorIssue] = field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class MirrorConfig:
     source: str
