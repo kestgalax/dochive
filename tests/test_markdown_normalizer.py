@@ -98,6 +98,62 @@ More content.
     assert normalize_markdown(markdown) == "Content.\n\nMore content.\n"
 
 
+def test_drops_leading_heading_anchor_buttons() -> None:
+    markdown = """
+[Q4 - 2026](#Q4_26)
+
+### Q4 - 2026
+Release notes.
+"""
+
+    assert (
+        normalize_markdown(markdown, anchor_headings={"Q4_26": "Q4 - 2026"})
+        == "### Q4 - 2026\nRelease notes.\n"
+    )
+
+
+def test_drops_leading_heading_anchor_toc_after_title() -> None:
+    markdown = """
+# Лицензии
+
+- [Пользовательские лицензии](#1)
+- [Лицензионный файл](#2)
+- [Учет сессий](#3)
+- [Контроль используемых лицензий](#4)
+
+## Пользовательские лицензии
+Основной текст.
+"""
+
+    assert normalize_markdown(
+        markdown,
+        anchor_headings={
+            "1": "Пользовательские лицензии",
+            "2": "Лицензионный файл",
+            "3": "Учет сессий",
+            "4": "Контроль используемых лицензий",
+        },
+    ) == "# Лицензии\n\n## Пользовательские лицензии\nОсновной текст.\n"
+
+
+def test_keeps_body_heading_anchor_links() -> None:
+    markdown = """
+# Лицензии
+
+В этом разделе см. [Лицензионный файл](#2).
+
+## Лицензионный файл
+Основной текст.
+"""
+
+    assert normalize_markdown(markdown, anchor_headings={"2": "Лицензионный файл"}) == (
+        "# Лицензии\n\n"
+        "В этом разделе см. [Лицензионный файл](#2).\n\n"
+        "## Лицензионный файл\n"
+        "Основной текст.\n"
+    )
+
+
 def test_cleanup_rules_ignore_fenced_code() -> None:
     markdown = """
 ```html

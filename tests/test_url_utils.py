@@ -277,3 +277,70 @@ def test_navigation_index_self_link_does_not_change_root_depth() -> None:
 
     assert issues == []
     assert entries[root_url].depth == 0
+
+
+def test_navigation_index_creates_placeholder_for_nav_link_outside_scope() -> None:
+    root_url = "https://example.com/docs/intro/intro.htm"
+    change_url = "https://example.com/docs/Change_List/Change_List.htm"
+    main_url = "https://example.com/docs/main_page.htm"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult(
+                "Introduction - Naumen SD Pro",
+                [
+                    {"href": change_url, "text": "Change List"},
+                    {"href": main_url, "text": "Main"},
+                    {"href": "https://cdn.example.net/image.png", "text": "Image"},
+                ],
+            ),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=("Introduction",),
+            allowed_prefixes=("https://example.com/docs/intro/",),
+        )
+    )
+
+    assert issues == []
+    assert entries[change_url].placeholder is True
+    assert entries[change_url].nav_path == ("Introduction", "Change List")
+    assert entries[change_url].nav_parent_url == root_url
+    assert main_url not in entries
+
+
+def test_navigation_index_does_not_nest_placeholder_with_independent_tocpath() -> None:
+    root_url = "https://example.com/docs/intro/intro.htm"
+    quick_url = "https://example.com/docs/quick/quick.htm"
+    quick_fetch_url = f"{quick_url}?tocpath=Quick%20Start%7C_____0"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult(
+                "Introduction - Naumen SD Pro",
+                [{"href": quick_fetch_url, "text": "Quick Start"}],
+            ),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=("Introduction",),
+            allowed_prefixes=("https://example.com/docs/intro/",),
+        )
+    )
+
+    assert issues == []
+    assert entries[quick_url].placeholder is True
+    assert entries[quick_url].nav_path == ("Quick Start",)
+    assert entries[quick_url].nav_parent_url is None

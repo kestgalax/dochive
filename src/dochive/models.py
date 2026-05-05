@@ -32,6 +32,7 @@ class Page:
     anchor_headings: dict[str, str] = field(default_factory=dict)
     assets: list[Asset] = field(default_factory=list)
     source_path: Path | None = None
+    placeholder: bool = False
 
 
 @dataclass(frozen=True)

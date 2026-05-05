@@ -353,6 +353,82 @@ def test_writer_preserves_other_mirrored_sections_between_runs(tmp_path: Path) -
     assert 'deleted:\n  []' in (root / "_catalog" / "sync.yaml").read_text(encoding="utf-8")
 
 
+def test_writer_uses_placeholder_path_for_followup_run(tmp_path: Path) -> None:
+    intro_url = "https://example.com/docs/sd/nsdpro/Content/introduction/introduction.htm"
+    change_url = "https://example.com/docs/sd/nsdpro/Content/Change_List/Change_List.htm"
+    stable_url = "https://example.com/docs/sd/nsdpro/Content/Change_List/stable-26.htm"
+
+    root = write_mirror(
+        [
+            Page(
+                source_url=intro_url,
+                canonical_url=intro_url,
+                title="Introduction",
+                markdown=f"[Change List]({change_url})\n",
+                depth=0,
+                nav_path=("Introduction",),
+                links_external=[change_url],
+            ),
+            Page(
+                source_url=change_url,
+                canonical_url=change_url,
+                title="Change List",
+                markdown="# Change List\n\nРаздел ожидает отдельного зеркалирования.\n",
+                depth=1,
+                nav_parent_url=intro_url,
+                nav_path=("Introduction", "Change List"),
+                placeholder=True,
+            ),
+        ],
+        MirrorConfig(source=intro_url, out_dir=tmp_path),
+    )
+
+    placeholder_path = root / "docs" / "sd" / "nsdpro" / "content" / "introduction" / "change_list" / "_index.md"
+    intro_path = root / "docs" / "sd" / "nsdpro" / "content" / "introduction" / "_index.md"
+
+    assert placeholder_path.exists()
+    assert 'page_type: "placeholder"' in placeholder_path.read_text(encoding="utf-8")
+    assert "[Change List](change_list/_index.md)" in intro_path.read_text(encoding="utf-8")
+    assert 'canonical_url: "https://example.com/docs/sd/nsdpro/Content/Change_List/Change_List.htm"' in (
+        root / "_catalog" / "pages.yaml"
+    ).read_text(encoding="utf-8")
+    assert 'placeholder: true' in (root / "_catalog" / "pages.yaml").read_text(encoding="utf-8")
+
+    write_mirror(
+        [
+            Page(
+                source_url=change_url,
+                canonical_url=change_url,
+                title="Change List",
+                markdown=f"[Stable]({stable_url})\n",
+                depth=0,
+                nav_path=("Introduction", "Change List"),
+                links_internal=[stable_url],
+            ),
+            Page(
+                source_url=stable_url,
+                canonical_url=stable_url,
+                title="Stable",
+                markdown="Stable content.\n",
+                depth=1,
+                nav_parent_url=change_url,
+            ),
+        ],
+        MirrorConfig(source=change_url, out_dir=tmp_path),
+    )
+
+    updated_text = placeholder_path.read_text(encoding="utf-8")
+    stable_path = root / "docs" / "sd" / "nsdpro" / "content" / "introduction" / "change_list" / "stable-26.md"
+
+    assert stable_path.exists()
+    assert 'page_type: "doc"' in updated_text
+    assert "Раздел ожидает отдельного зеркалирования" not in updated_text
+    assert not (root / "docs" / "sd" / "nsdpro" / "content" / "change_list" / "change_list.md").exists()
+    assert 'parent: "docs/sd/nsdpro/content/introduction/change_list/_index.md"' in stable_path.read_text(
+        encoding="utf-8"
+    )
+
+
 def test_index_page_assets_stay_beside_index_file() -> None:
     page_relpath = PurePosixPath("docs/beta_35/_index.md")
     asset = Asset(source="https://example.com/assets/example.png", kind="images")

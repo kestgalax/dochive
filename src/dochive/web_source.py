@@ -27,6 +27,7 @@ class NavigationEntry:
     discovered_from_url: str | None = None
     nav_parent_url: str | None = None
     nav_path: tuple[str, ...] = ()
+    placeholder: bool = False
 
 
 def crawl_web(config: MirrorConfig) -> MirrorRun:
@@ -159,6 +160,15 @@ async def _build_navigation_index(
             if target == url:
                 continue
             if not _is_allowed_url(target, root_url, allowed_prefixes, config):
+                _remember_placeholder_entry(
+                    entries,
+                    target=target,
+                    target_fetch_url=target_fetch_url,
+                    target_nav_path=extract_tocpath(target_fetch_url),
+                    link_text=link_text,
+                    current_entry=entry,
+                    root_url=root_url,
+                )
                 continue
 
             target_nav_path = extract_tocpath(target_fetch_url)
@@ -170,7 +180,17 @@ async def _build_navigation_index(
                 current_title=title,
             )
             depth = entry.depth + 1
-            if target not in entries and (depth > config.max_depth or len(entries) >= config.max_pages):
+            fetched_entry_count = len([item for item in entries.values() if not item.placeholder])
+            if target not in entries and (depth > config.max_depth or fetched_entry_count >= config.max_pages):
+                _remember_placeholder_entry(
+                    entries,
+                    target=target,
+                    target_fetch_url=target_fetch_url,
+                    target_nav_path=target_nav_path,
+                    link_text=link_text,
+                    current_entry=entry,
+                    root_url=root_url,
+                )
                 continue
             if target not in entries:
                 entries[target] = NavigationEntry(
@@ -223,13 +243,30 @@ async def _fetch_pages_from_navigation_index(
     for entry in sorted(nav_index.values(), key=lambda item: item.order):
         if entry.depth > config.max_depth:
             continue
-        if len(pages) >= config.max_pages:
+        fetched_pages = len([page for page in pages if not page.placeholder])
+        if not entry.placeholder and fetched_pages >= config.max_pages:
             issues.append(MirrorIssue(
                 kind="max_pages_reached",
                 message=f"Stopped after {config.max_pages} pages",
                 severity="info",
             ))
             break
+        if entry.placeholder:
+            title = entry.nav_path[-1] if entry.nav_path else entry.canonical_url.rsplit("/", 1)[-1]
+            pages.append(
+                Page(
+                    source_url=entry.fetch_url,
+                    canonical_url=entry.canonical_url,
+                    title=title,
+                    markdown=_placeholder_markdown(title, entry.fetch_url),
+                    depth=entry.depth,
+                    parent_url=entry.discovered_from_url,
+                    nav_parent_url=entry.nav_parent_url,
+                    nav_path=entry.nav_path,
+                    placeholder=True,
+                )
+            )
+            continue
 
         result, issue = await _fetch_crawl_result(crawler, run_config, entry.fetch_url, "content")
         if issue:
@@ -244,10 +281,12 @@ async def _fetch_pages_from_navigation_index(
         if html:
             markdown = promote_markdown_headings(markdown, html)
             markdown = inject_html_videos(markdown, html, entry.fetch_url)
+        anchor_headings = extract_html_anchor_headings(html) if html else {}
         markdown = normalize_markdown(
             markdown,
             clean=config.clean_markdown,
             extra_noise_lines=config.noise_lines,
+            anchor_headings=anchor_headings,
         )
         links = getattr(result, "links", {}) or {}
         media = getattr(result, "media", {}) or {}
@@ -267,7 +306,7 @@ async def _fetch_pages_from_navigation_index(
                 nav_path=entry.nav_path or _extract_markdown_breadcrumb_path(markdown),
                 links_internal=internal,
                 links_external=external,
-                anchor_headings=extract_html_anchor_headings(html) if html else {},
+                anchor_headings=anchor_headings,
                 assets=assets,
                 status_code=getattr(result, "status_code", 200) or 200,
             )
@@ -341,6 +380,70 @@ def _remember_navigation_hint(
         nav_parent_by_canonical[target] = nav_parent_url
         if page := page_by_canonical.get(target):
             page.nav_parent_url = nav_parent_url
+
+
+def _remember_placeholder_entry(
+    entries: dict[str, NavigationEntry],
+    *,
+    target: str,
+    target_fetch_url: str,
+    target_nav_path: tuple[str, ...],
+    link_text: str,
+    current_entry: NavigationEntry,
+    root_url: str,
+) -> None:
+    if target in entries or not _is_placeholder_candidate(target, root_url):
+        return
+    nav_path = target_nav_path or _link_text_nav_path(current_entry.nav_path, link_text)
+    if not nav_path:
+        return
+    entries[target] = NavigationEntry(
+        canonical_url=target,
+        fetch_url=target_fetch_url,
+        depth=current_entry.depth + 1,
+        order=len(entries) + 1,
+        discovered_from_url=current_entry.canonical_url,
+        nav_parent_url=_placeholder_parent_url(nav_path, target_nav_path, current_entry),
+        nav_path=nav_path,
+        placeholder=True,
+    )
+
+
+def _is_placeholder_candidate(target: str, root_url: str) -> bool:
+    if not same_domain(target, root_url):
+        return False
+    parsed = urlparse(target)
+    path = parsed.path.lower()
+    if path.endswith("/main_page.htm") or path.endswith("/main_page.html"):
+        return False
+    return path.endswith((".htm", ".html", ".xhtml"))
+
+
+def _link_text_nav_path(current_nav_path: tuple[str, ...], link_text: str) -> tuple[str, ...]:
+    clean = re.sub(r"\s+", " ", link_text).strip()
+    if not clean or not current_nav_path:
+        return ()
+    return (*current_nav_path, clean)
+
+
+def _placeholder_parent_url(
+    nav_path: tuple[str, ...],
+    target_nav_path: tuple[str, ...],
+    current_entry: NavigationEntry,
+) -> str | None:
+    if not target_nav_path:
+        return current_entry.canonical_url
+    if len(nav_path) > 1 and nav_path[:-1] == current_entry.nav_path:
+        return current_entry.canonical_url
+    return None
+
+
+def _placeholder_markdown(title: str, source_url: str) -> str:
+    return (
+        f"# {title}\n\n"
+        "Раздел ожидает отдельного зеркалирования.\n\n"
+        f"Источник: {source_url}\n"
+    )
 
 
 def _navigation_hint(

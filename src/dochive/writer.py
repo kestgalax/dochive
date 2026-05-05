@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -41,8 +42,8 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     previous_hashes = _catalog_hashes(previous_pages)
 
     child_urls_by_parent = _build_child_mapping(pages)
-    path_by_url = _build_path_mapping(pages, config, child_urls_by_parent)
-    sync_roots = _sync_roots(path_by_url.values())
+    path_by_url = _build_path_mapping(pages, config, child_urls_by_parent, previous_pages)
+    sync_roots = _sync_roots(path_by_url.values(), _relocated_previous_paths(previous_pages, pages, path_by_url))
     scoped_previous_hashes = {
         path: content_hash
         for path, content_hash in previous_hashes.items()
@@ -107,7 +108,10 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
                     }
                 )
         for target in page.links_external:
-            written_links.append({"from": str(relpath), "to": target, "kind": "external"})
+            if target in path_by_url:
+                written_links.append({"from": str(relpath), "to": str(path_by_url[target]), "kind": "internal"})
+            else:
+                written_links.append({"from": str(relpath), "to": target, "kind": "external"})
         for asset in assets:
             written_assets.append(
                 {
@@ -210,6 +214,10 @@ def _yaml_scalar_value(value: str) -> object:
         return []
     if re.fullmatch(r"-?\d+", value):
         return int(value)
+    if value == "true":
+        return True
+    if value == "false":
+        return False
     return _yaml_string_value(value)
 
 
@@ -304,7 +312,12 @@ def _page_frontmatter(
     children = [str(path_by_url[url]) for url in child_urls_by_parent.get(page.canonical_url, []) if url in path_by_url]
     nav_parent_url = nav_parent_by_url.get(page.canonical_url)
     parent = str(path_by_url[nav_parent_url]) if nav_parent_url in path_by_url else None
-    internal_links = [str(path_by_url[url]) for url in page.links_internal if url in path_by_url]
+    internal_links = [
+        str(path_by_url[url])
+        for url in [*page.links_internal, *page.links_external]
+        if url in path_by_url
+    ]
+    external_links = [url for url in page.links_external if url not in path_by_url]
     return {
         "source_url": page.source_url,
         "canonical_url": page.canonical_url,
@@ -317,7 +330,10 @@ def _page_frontmatter(
         "order": order_by_url.get(page.canonical_url, 0),
         "parent": parent,
         "children": children,
-        "page_type": "doc",
+        "page_type": "placeholder" if page.placeholder else "doc",
+        "placeholder": page.placeholder,
+        "nav_path": list(page.nav_path),
+        "nav_parent_url": page.nav_parent_url,
         "tags": [],
         "summary": "",
         "content_hash": content_hash,
@@ -329,7 +345,7 @@ def _page_frontmatter(
         },
         "links": {
             "internal": internal_links,
-            "external": page.links_external,
+            "external": external_links,
         },
     }
 
@@ -339,10 +355,14 @@ def _page_catalog_entry(page: Page, relpath: PurePosixPath, frontmatter: dict[st
         "path": str(relpath),
         "title": page.title,
         "source_url": page.source_url,
+        "canonical_url": page.canonical_url,
         "depth": page.depth,
         "order": frontmatter["order"],
         "summary": frontmatter["summary"],
         "tags": frontmatter["tags"],
+        "nav_path": json.dumps(list(page.nav_path), ensure_ascii=False),
+        "nav_parent_url": page.nav_parent_url,
+        "placeholder": page.placeholder,
         "content_hash": frontmatter["content_hash"],
     }
 
@@ -351,9 +371,14 @@ def _build_path_mapping(
     pages: list[Page],
     config: MirrorConfig,
     child_urls_by_parent: dict[str, list[str]],
+    previous_pages: list[dict[str, object]] | None = None,
 ) -> dict[str, PurePosixPath]:
     if is_url(config.source):
-        mapping = {page.canonical_url: url_to_markdown_relpath(page.canonical_url) for page in pages}
+        mapping = {
+            page.canonical_url: _catalog_path_for_page(page, previous_pages or [])
+            or url_to_markdown_relpath(page.canonical_url)
+            for page in pages
+        }
         return _apply_gramax_layout(pages, mapping, child_urls_by_parent)
 
     source_path = Path(config.source).resolve()
@@ -371,6 +396,41 @@ def _build_path_mapping(
     return _apply_gramax_layout(pages, mapping, child_urls_by_parent)
 
 
+def _catalog_path_for_page(page: Page, previous_pages: list[dict[str, object]]) -> PurePosixPath | None:
+    by_url: dict[str, PurePosixPath] = {}
+    by_nav_path: dict[tuple[str, ...], PurePosixPath] = {}
+    for item in previous_pages:
+        path = item.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        relpath = PurePosixPath(path)
+        canonical_url = item.get("canonical_url")
+        if isinstance(canonical_url, str) and canonical_url:
+            by_url[canonical_url] = relpath
+        nav_path = _catalog_nav_path(item)
+        if nav_path:
+            by_nav_path[nav_path] = relpath
+
+    if page.canonical_url in by_url:
+        return by_url[page.canonical_url]
+    if len(page.nav_path) > 1 and (parent_path := by_nav_path.get(page.nav_path[:-1])):
+        return _move_page_under_folder(url_to_markdown_relpath(page.canonical_url), parent_path.parent)
+    return None
+
+
+def _catalog_nav_path(item: dict[str, object]) -> tuple[str, ...]:
+    value = item.get("nav_path")
+    if not isinstance(value, str) or not value:
+        return ()
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(parsed, list):
+        return ()
+    return tuple(str(part) for part in parsed if str(part).strip())
+
+
 def _apply_gramax_layout(
     pages: list[Page],
     mapping: dict[str, PurePosixPath],
@@ -379,6 +439,10 @@ def _apply_gramax_layout(
     final_mapping = dict(mapping)
     parents_with_children = set(child_urls_by_parent)
     nav_url_by_path = _nav_url_by_path(pages)
+
+    for page in pages:
+        if page.placeholder and page.canonical_url in final_mapping:
+            final_mapping[page.canonical_url] = _page_index_path(final_mapping[page.canonical_url])
 
     for parent_url in parents_with_children:
         if parent_url in final_mapping:
@@ -495,18 +559,32 @@ def _merge_catalog_items(
     return [*preserved, *current]
 
 
-def _sync_roots(paths: object) -> tuple[PurePosixPath, ...]:
+def _relocated_previous_paths(
+    previous_pages: list[dict[str, object]],
+    pages: list[Page],
+    path_by_url: dict[str, PurePosixPath],
+) -> list[PurePosixPath]:
+    current_urls = {page.canonical_url for page in pages}
+    paths: list[PurePosixPath] = []
+    for item in previous_pages:
+        canonical_url = item.get("canonical_url")
+        old_path = item.get("path")
+        if not isinstance(canonical_url, str) or canonical_url not in current_urls:
+            continue
+        if not isinstance(old_path, str) or not old_path:
+            continue
+        current_path = path_by_url.get(canonical_url)
+        if current_path and str(current_path) != old_path:
+            paths.append(PurePosixPath(old_path))
+    return paths
+
+
+def _sync_roots(paths: object, relocated_previous_paths: object = ()) -> tuple[PurePosixPath, ...]:
     roots: set[PurePosixPath] = set()
-    for path in paths:
+    for path in [*list(paths), *list(relocated_previous_paths)]:
         if not isinstance(path, PurePosixPath):
             continue
-        parts = path.parts
-        for index, part in enumerate(parts[:-1]):
-            if part.lower() == "content" and index + 1 < len(parts):
-                roots.add(PurePosixPath(*parts[: index + 2]))
-                break
-        else:
-            roots.add(PurePosixPath(parts[0]) if parts else PurePosixPath("."))
+        roots.add(path.parent if str(path.parent) != "." else path)
     return tuple(sorted(roots, key=str))
 
 
