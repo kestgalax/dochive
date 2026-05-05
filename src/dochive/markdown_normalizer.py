@@ -143,6 +143,11 @@ def _drop_leading_heading_anchor_links(text: str, anchor_headings: dict[str, str
     if not anchor_headings:
         return text
 
+    known_targets = {
+        _normalize_anchor_target(target)
+        for target in (*anchor_headings.keys(), *anchor_headings.values())
+        if _normalize_anchor_target(target)
+    }
     lines = text.splitlines()
     output: list[str] = []
     index = 0
@@ -152,7 +157,7 @@ def _drop_leading_heading_anchor_links(text: str, anchor_headings: dict[str, str
             output.append(line)
             index += 1
             continue
-        if _is_heading_anchor_link_line(line, anchor_headings):
+        if _is_heading_anchor_link_line(line, known_targets):
             index += 1
             continue
         break
@@ -161,7 +166,7 @@ def _drop_leading_heading_anchor_links(text: str, anchor_headings: dict[str, str
     return "\n".join(output)
 
 
-def _is_heading_anchor_link_line(line: str, anchor_headings: dict[str, str]) -> bool:
+def _is_heading_anchor_link_line(line: str, known_targets: set[str]) -> bool:
     stripped = re.sub(r"^\s*(?:[-*]|\d+[.)])\s+", "", line.strip())
     if not stripped:
         return False
@@ -174,7 +179,7 @@ def _is_heading_anchor_link_line(line: str, anchor_headings: dict[str, str]) -> 
         match = _MARKDOWN_LINK_TOKEN_RE.match(stripped, position)
         if not match:
             return False
-        if _target_fragment(match.group(2)) not in anchor_headings:
+        if _normalize_anchor_target(_target_fragment(match.group(2))) not in known_targets:
             return False
         found = True
         position = match.end()
@@ -186,6 +191,10 @@ def _target_fragment(target: str) -> str:
     if target.startswith("#"):
         return unquote(target[1:]).strip()
     return unquote(urlparse(target).fragment).strip()
+
+
+def _normalize_anchor_target(target: str) -> str:
+    return re.sub(r"\s+", " ", target).strip()
 
 
 def _normalize_media_spacing(text: str) -> str:

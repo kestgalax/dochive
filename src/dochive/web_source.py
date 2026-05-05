@@ -394,9 +394,12 @@ def _remember_placeholder_entry(
 ) -> None:
     if target in entries or not _is_placeholder_candidate(target, root_url):
         return
-    nav_path = target_nav_path or _link_text_nav_path(current_entry.nav_path, link_text)
+    nav_path = target_nav_path
     if not nav_path:
-        return
+        title = _placeholder_title(link_text, target)
+        nav_path = (_url_section_label(target), title)
+    else:
+        title = nav_path[-1]
     entries[target] = NavigationEntry(
         canonical_url=target,
         fetch_url=target_fetch_url,
@@ -419,11 +422,19 @@ def _is_placeholder_candidate(target: str, root_url: str) -> bool:
     return path.endswith((".htm", ".html", ".xhtml"))
 
 
-def _link_text_nav_path(current_nav_path: tuple[str, ...], link_text: str) -> tuple[str, ...]:
+def _placeholder_title(link_text: str, target: str) -> str:
     clean = re.sub(r"\s+", " ", link_text).strip()
-    if not clean or not current_nav_path:
-        return ()
-    return (*current_nav_path, clean)
+    if clean and not re.fullmatch(r"подробнее|подробное описание", clean, re.IGNORECASE):
+        return clean
+    stem = Path(urlparse(target).path).stem
+    return stem.replace("-", " ").replace("_", " ").title() or target.rsplit("/", 1)[-1]
+
+
+def _url_section_label(target: str) -> str:
+    parts = [part for part in urlparse(target).path.strip("/").split("/") if part]
+    if len(parts) >= 2:
+        return parts[-2].replace("-", " ").replace("_", " ").title()
+    return "Раздел"
 
 
 def _placeholder_parent_url(
@@ -432,7 +443,7 @@ def _placeholder_parent_url(
     current_entry: NavigationEntry,
 ) -> str | None:
     if not target_nav_path:
-        return current_entry.canonical_url
+        return None
     if len(nav_path) > 1 and nav_path[:-1] == current_entry.nav_path:
         return current_entry.canonical_url
     return None

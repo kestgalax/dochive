@@ -136,6 +136,28 @@ def test_drops_leading_heading_anchor_toc_after_title() -> None:
     ) == "# Лицензии\n\n## Пользовательские лицензии\nОсновной текст.\n"
 
 
+def test_drops_leading_links_rewritten_to_heading_anchor_text() -> None:
+    markdown = """
+# План развития продукта
+### Q4 - 2026
+[Q4 - 2026](#Q3 - 2026) [Q3 - 2026](#Q2 - 2026) [Q2 - 2026](#Q1 - 2026)
+[Q1 - 2026](#Q4 - 2025) [Q4 - 2025](#Q3_25)
+
+  * Обновленные модули.
+"""
+
+    assert normalize_markdown(
+        markdown,
+        anchor_headings={
+            "Q3_26": "Q3 - 2026",
+            "Q2_26": "Q2 - 2026",
+            "Q1_26": "Q1 - 2026",
+            "Q4_25": "Q4 - 2025",
+            "Q3_25": "Q3 - 2025",
+        },
+    ) == "# План развития продукта\n### Q4 - 2026\n\n  * Обновленные модули.\n"
+
+
 def test_keeps_body_heading_anchor_links() -> None:
     markdown = """
 # Лицензии

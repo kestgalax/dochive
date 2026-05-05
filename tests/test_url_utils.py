@@ -216,7 +216,7 @@ def test_navigation_index_prioritizes_tocpath_links_for_page_limit() -> None:
 
     assert issues == []
     assert nav_url in entries
-    assert context_url not in entries
+    assert entries[context_url].placeholder is True
 
 
 def test_navigation_index_adds_plain_links_within_allowed_scope() -> None:
@@ -310,9 +310,39 @@ def test_navigation_index_creates_placeholder_for_nav_link_outside_scope() -> No
 
     assert issues == []
     assert entries[change_url].placeholder is True
-    assert entries[change_url].nav_path == ("Introduction", "Change List")
-    assert entries[change_url].nav_parent_url == root_url
+    assert entries[change_url].nav_path == ("Change List", "Change List")
+    assert entries[change_url].nav_parent_url is None
     assert main_url not in entries
+
+
+def test_navigation_index_plain_context_placeholder_uses_url_section_not_current_page() -> None:
+    root_url = "https://example.com/docs/Change_List/archive.htm"
+    target_url = "https://example.com/docs/spm_role/service_category_owner.htm"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult(
+                "Archive - Naumen SD Pro",
+                [{"href": target_url, "text": "подробнее"}],
+            ),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=("Introduction", "Change List", "Archive"),
+            allowed_prefixes=("https://example.com/docs/Change_List/",),
+        )
+    )
+
+    assert issues == []
+    assert entries[target_url].placeholder is True
+    assert entries[target_url].nav_path == ("Spm Role", "Service Category Owner")
+    assert entries[target_url].nav_parent_url is None
 
 
 def test_navigation_index_does_not_nest_placeholder_with_independent_tocpath() -> None:
