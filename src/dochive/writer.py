@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover - fallback for minimal embedded environm
 
 from .html_extract import is_local_file_reference
 from .image_size import read_image_size
+from .markdown_normalizer import _drop_leading_heading_anchor_links
 from .models import Asset, MirrorConfig, MirrorIssue, Page
 from .url_utils import canonicalize_url, is_url, short_hash, source_root_name, url_to_markdown_relpath
 from .yaml_writer import dumps_yaml
@@ -859,6 +860,7 @@ def _rewrite_markdown_links(
         asset_by_source,
     )
     markdown = _normalize_media_spacing(markdown)
+    markdown = _drop_leading_heading_anchor_links(markdown, page.anchor_headings)
     return _render_details_sections(markdown)
 
 

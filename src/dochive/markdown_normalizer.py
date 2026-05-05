@@ -151,17 +151,21 @@ def _drop_leading_heading_anchor_links(text: str, anchor_headings: dict[str, str
     lines = text.splitlines()
     output: list[str] = []
     index = 0
+    dropped = False
     while index < len(lines):
         line = lines[index]
-        if not line.strip() or _MARKDOWN_HEADING_RE.match(line.strip()):
+        if not line.strip() or _MARKDOWN_HEADING_RE.match(line.strip()) or _looks_like_breadcrumb(line):
             output.append(line)
             index += 1
             continue
         if _is_heading_anchor_link_line(line, known_targets):
+            dropped = True
             index += 1
             continue
         break
 
+    if dropped and not any(line.strip() for line in lines[index:]):
+        return text
     output.extend(lines[index:])
     return "\n".join(output)
 
@@ -179,7 +183,9 @@ def _is_heading_anchor_link_line(line: str, known_targets: set[str]) -> bool:
         match = _MARKDOWN_LINK_TOKEN_RE.match(stripped, position)
         if not match:
             return False
-        if _normalize_anchor_target(_target_fragment(match.group(2))) not in known_targets:
+        target = _normalize_anchor_target(_target_fragment(match.group(2)))
+        label = _normalize_anchor_target(match.group(1))
+        if target not in known_targets and label not in known_targets:
             return False
         found = True
         position = match.end()

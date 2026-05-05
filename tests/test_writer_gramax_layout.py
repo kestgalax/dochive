@@ -473,6 +473,38 @@ def test_writer_rewrites_original_anchor_to_gramax_heading(tmp_path: Path) -> No
     assert "beta_35.md#356" not in text
 
 
+def test_writer_drops_leading_heading_anchor_links_after_rewrite(tmp_path: Path) -> None:
+    page_url = "https://example.com/docs/plan.htm"
+    page = Page(
+        source_url=page_url,
+        canonical_url=page_url,
+        title="Plan",
+        markdown=(
+            "[Введение Naumen Service Desk Pro](../_index.md) > План развития продукта\n"
+            "# План развития продукта\n"
+            "### Q4 - 2026\n"
+            "[Q4 - 2026](#Q3_26) [Q3 - 2026](#Q2_26)\n"
+            "[Q2 - 2026](#Q1_26) [Q1 - 2026](#legacy_unknown)\n\n"
+            "  * Обновленные модули.\n"
+        ),
+        depth=0,
+        anchor_headings={
+            "Q3_26": "Q3 - 2026",
+            "Q2_26": "Q2 - 2026",
+            "Q1_26": "Q1 - 2026",
+            "Q1_26_alt": "Q1 - 2026",
+        },
+    )
+
+    root = write_mirror([page], MirrorConfig(source=page_url, out_dir=tmp_path))
+    text = (root / "docs" / "plan.md").read_text(encoding="utf-8")
+
+    assert "[Q4 - 2026]" not in text
+    assert "[Q3 - 2026]" not in text
+    assert "[Введение Naumen Service Desk Pro](../_index.md) > План развития продукта" in text
+    assert "### Q4 - 2026\n\n  * Обновленные модули." in text
+
+
 def test_writer_creates_gramax_doc_root_next_to_content_folder(tmp_path: Path) -> None:
     page_url = "https://example.com/docs/sd/nsdpro/Content/page.htm"
     root = write_mirror(

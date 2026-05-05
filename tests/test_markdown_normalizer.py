@@ -138,10 +138,12 @@ def test_drops_leading_heading_anchor_toc_after_title() -> None:
 
 def test_drops_leading_links_rewritten_to_heading_anchor_text() -> None:
     markdown = """
+[Введение Naumen Service Desk Pro](../_index.md) > План развития продукта
 # План развития продукта
 ### Q4 - 2026
 [Q4 - 2026](#Q3 - 2026) [Q3 - 2026](#Q2 - 2026) [Q2 - 2026](#Q1 - 2026)
 [Q1 - 2026](#Q4 - 2025) [Q4 - 2025](#Q3_25)
+[Q4 - 2023](#Q3 - 2023) [Q3 - 2023](#Q3_23)
 
   * Обновленные модули.
 """
@@ -154,8 +156,15 @@ def test_drops_leading_links_rewritten_to_heading_anchor_text() -> None:
             "Q1_26": "Q1 - 2026",
             "Q4_25": "Q4 - 2025",
             "Q3_25": "Q3 - 2025",
+            "Q4_23": "Q4 - 2023",
+            "Q3_23_alt": "Q3 - 2023",
         },
-    ) == "# План развития продукта\n### Q4 - 2026\n\n  * Обновленные модули.\n"
+    ) == (
+        "[Введение Naumen Service Desk Pro](../_index.md) > План развития продукта\n"
+        "# План развития продукта\n"
+        "### Q4 - 2026\n\n"
+        "  * Обновленные модули.\n"
+    )
 
 
 def test_keeps_body_heading_anchor_links() -> None:
