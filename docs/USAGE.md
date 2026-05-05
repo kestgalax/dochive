@@ -20,7 +20,7 @@ cd dochive
 Create a virtual environment:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 ```
 
 Activate it on Windows PowerShell:
@@ -54,12 +54,47 @@ During development, editable installation keeps the `dochive` command pointed at
 python -m dochive --help
 ```
 
+### macOS Homebrew Python
+
+Homebrew Python does not allow package installs into the global interpreter. If `python3 -m pip install -e .` fails with `externally-managed-environment`, create a virtual environment first:
+
+```bash
+cd dochive
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+python -m dochive --help
+```
+
+After activation, `python` points to `.venv/bin/python`, so use `python -m dochive ...` for mirror commands in that shell.
+
+If `.venv` already exists and was created with another Python installer, check it before troubleshooting HTTPS errors:
+
+```bash
+.venv/bin/python -c "import ssl, sys; print(sys.executable); print(ssl.get_default_verify_paths())"
+```
+
+If `cafile=None`, recreate the environment with Homebrew Python or reinstall Dochive after updating this project version.
+
 ## Optional Web Crawling Dependencies
 
 Local HTML mirroring does not need browser dependencies. For JavaScript-rendered web documentation, install the optional Crawl4AI extra:
 
 ```bash
 python -m pip install -e ".[crawl4ai]"
+```
+
+After installing Crawl4AI, download the Playwright browser binaries:
+
+```bash
+playwright install chromium
+```
+
+For all browsers (Chromium, Firefox, WebKit):
+
+```bash
+playwright install
 ```
 
 Then run web crawls with `--render-js`.
@@ -95,18 +130,24 @@ dochive mirror `
 ```
 
 ## Mirror A Web Documentation Subtree
-Example 1:
-```powershell
-dochive mirror `
-  --source "url" `
-  --out .\mirror `
-  --render-js `
-  --max-depth 1 `
-  --max-pages 20 `
-  --scope subtree `
-  --save-assets images
+
+**macOS / Linux:**
+
+```bash
+dochive mirror \
+  --source "url" \
+  --out ./mirror \
+  --render-js \
+  --max-depth 1 \
+  --max-pages 20 \
+  --scope subtree \
+  --save-assets images \
+  --image-size-mode max-width \
+  --image-max-width 900
 ```
-Example 2:
+
+**Windows PowerShell:**
+
 ```powershell
 dochive mirror `
   --source "url" `
@@ -328,6 +369,8 @@ Typical warnings:
 - unresolved internal links because `--max-depth` or `--max-pages` was too low;
 - missing local HTML links;
 - missing or failed assets.
+
+If remote image downloads fail with `CERTIFICATE_VERIFY_FAILED`, Python could not verify the site's HTTPS certificate chain. Use a Python environment with CA certificates configured, for example a fresh `.venv` created from Homebrew `python3`, then reinstall Dochive inside it. For the python.org macOS installer, run the bundled `/Applications/Python 3.x/Install Certificates.command` once and retry the mirror.
 
 ## Publish With Git
 

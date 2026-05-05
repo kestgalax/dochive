@@ -219,7 +219,7 @@ def test_navigation_index_prioritizes_tocpath_links_for_page_limit() -> None:
     assert context_url not in entries
 
 
-def test_navigation_index_does_not_add_new_pages_from_plain_context_links() -> None:
+def test_navigation_index_adds_plain_links_within_allowed_scope() -> None:
     root_url = "https://example.com/docs/root.htm"
     old_url = "https://example.com/docs/old.htm"
     crawler = FakeCrawler(
@@ -228,6 +228,7 @@ def test_navigation_index_does_not_add_new_pages_from_plain_context_links() -> N
                 "Root - Naumen SD Pro",
                 [{"href": old_url, "text": "Old page"}],
             ),
+            old_url: FakeCrawlResult("Old page - Naumen SD Pro", []),
         }
     )
 
@@ -244,4 +245,35 @@ def test_navigation_index_does_not_add_new_pages_from_plain_context_links() -> N
     )
 
     assert issues == []
-    assert old_url not in entries
+    assert old_url in entries
+    assert entries[old_url].fetch_url == old_url
+    assert entries[old_url].depth == 1
+    assert entries[old_url].nav_parent_url == root_url
+
+
+def test_navigation_index_self_link_does_not_change_root_depth() -> None:
+    root_url = "https://example.com/docs/root.htm"
+    root_fetch_url = f"{root_url}?tocpath=Root%7CSection%7C_____0"
+    crawler = FakeCrawler(
+        {
+            root_fetch_url: FakeCrawlResult(
+                "Section - Naumen SD Pro",
+                [{"href": root_fetch_url, "text": "Section"}],
+            ),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_fetch_url, out_dir=Path("."), max_depth=5, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_fetch_url,
+            root_nav_path=("Root", "Section"),
+            allowed_prefixes=("https://example.com/docs/",),
+        )
+    )
+
+    assert issues == []
+    assert entries[root_url].depth == 0

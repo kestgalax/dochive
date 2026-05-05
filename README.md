@@ -17,7 +17,7 @@ Dochive requires Python 3.10 or newer.
 ```bash
 git clone https://github.com/kestgalax/dochive.git
 cd dochive
-python -m venv .venv
+python3 -m venv .venv
 ```
 
 Activate the virtual environment.
@@ -42,6 +42,10 @@ python -m pip install -e .
 dochive --help
 ```
 
+On macOS with Homebrew Python, install into a virtual environment as shown above. If `python3 -m pip install -e .` fails with `externally-managed-environment`, create and activate `.venv`, then use `python -m pip install -e .` inside it.
+
+If `.venv` was created before switching Python installers, recreate it with Homebrew `python3` or check `.venv/bin/python -c "import ssl; print(ssl.get_default_verify_paths())"` before diagnosing HTTPS asset failures.
+
 ## Usage
 
 Mirror local HTML:
@@ -50,10 +54,11 @@ Mirror local HTML:
 dochive mirror --source ./site-html --out ./mirror --max-depth 3 --save-assets images,files
 ```
 
-For web crawling, install the optional Crawl4AI extra and run:
+For web crawling, install the optional Crawl4AI extra and Playwright browsers:
 
 ```bash
 python -m pip install -e ".[crawl4ai]"
+playwright install chromium
 dochive mirror --source https://docs.example.com --out ./mirror --render-js
 ```
 
@@ -62,6 +67,8 @@ During development, editable installation keeps the `dochive` console command po
 ```bash
 python -m dochive --help
 ```
+
+If HTTPS asset downloads fail with `CERTIFICATE_VERIFY_FAILED`, make sure the crawl runs with a Python environment that has CA certificates configured. A fresh `.venv` created from Homebrew `python3` usually inherits the Homebrew certificate bundle; the python.org macOS installer can also be fixed with `/Applications/Python 3.x/Install Certificates.command`.
 
 ## Project Docs
 

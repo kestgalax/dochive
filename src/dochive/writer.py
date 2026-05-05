@@ -4,11 +4,17 @@ import hashlib
 import os
 import re
 import shutil
+import ssl
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
-from urllib.request import url2pathname, urlretrieve
+from urllib.request import url2pathname, urlopen
+
+try:
+    import certifi
+except ImportError:  # pragma: no cover - fallback for minimal embedded environments
+    certifi = None
 
 from .html_extract import is_local_file_reference
 from .image_size import read_image_size
@@ -1111,7 +1117,7 @@ def _materialize_assets(
                 materialized.append(asset)
                 continue
             elif is_url(asset.source):
-                urlretrieve(asset.source, target)
+                _download_url(asset.source, target)
                 materialized.append(_asset_with_local_metadata(asset, target_rel.as_posix(), target))
                 continue
         except OSError as exc:
@@ -1127,6 +1133,14 @@ def _materialize_assets(
             )
         materialized.append(asset)
     return materialized, errors
+
+
+def _download_url(source: str, target: Path) -> None:
+    context = None
+    if certifi is not None:
+        context = ssl.create_default_context(cafile=certifi.where())
+    with urlopen(source, context=context) as response, target.open("wb") as output:
+        shutil.copyfileobj(response, output)
 
 
 def _asset_with_local_metadata(asset: Asset, local_path: str, file_path: Path) -> Asset:

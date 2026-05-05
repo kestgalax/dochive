@@ -1,4 +1,5 @@
 from dochive.markdown_normalizer import normalize_markdown
+from dochive.html_extract import promote_markdown_headings
 
 
 def test_separates_media_tags_with_blank_lines() -> None:
@@ -141,3 +142,37 @@ Actual article text.
 # Helpful Functions
 Actual article text.
 """
+
+
+def test_promote_markdown_headings_drops_later_duplicate_after_anchor_insertion() -> None:
+    html = """
+<p class="H3"><a name="Q4_22"></a>Q4 - 2022</p>
+<ul><li>First item.</li></ul>
+"""
+    markdown = """
+First item.
+
+### Q4 - 2022
+"""
+
+    assert promote_markdown_headings(markdown, html).count("### Q4 - 2022") == 1
+
+
+def test_promote_markdown_headings_does_not_use_body_text_as_anchor_hint() -> None:
+    html = """
+<p class="H3"><a name="Q1"></a>Q1 - 2023</p>
+<p>Common label:</p>
+<p class="H3"><a name="Q4"></a>Q4 - 2022</p>
+<p>Common label:</p>
+"""
+    markdown = """
+Q1 - 2023
+Common label:
+Q4 - 2022
+Common label:
+"""
+
+    promoted = promote_markdown_headings(markdown, html)
+
+    assert promoted.index("### Q1 - 2023") < promoted.index("Common label:")
+    assert promoted.index("### Q4 - 2022") > promoted.index("Common label:")

@@ -290,7 +290,7 @@ class _HtmlHeadingParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.headings: list[HtmlHeading] = []
         self._skip_depth = 0
-        self._active_heading: tuple[int, int, list[str]] | None = None
+        self._active_heading: tuple[int, int, list[str], list[str]] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in {"script", "style", "noscript", "svg"}:
@@ -300,15 +300,23 @@ class _HtmlHeadingParser(HTMLParser):
             return
 
         if self._active_heading is not None:
-            level, depth, parts = self._active_heading
-            self._active_heading = (level, depth + 1, parts)
+            level, depth, parts, anchors = self._active_heading
+            attrs_map = {key.lower(): value or "" for key, value in attrs}
+            if tag == "a" and not attrs_map.get("href"):
+                _append_anchor(anchors, attrs_map.get("name", ""))
+                _append_anchor(anchors, attrs_map.get("id", ""))
+            self._active_heading = (level, depth + 1, parts, anchors)
             return
 
         attrs_map = {key.lower(): value or "" for key, value in attrs}
         if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
-            self._active_heading = (int(tag[1]), 1, [])
+            anchors: list[str] = []
+            _append_anchor(anchors, attrs_map.get("id", ""))
+            self._active_heading = (int(tag[1]), 1, [], anchors)
         elif tag in {"p", "div"} and (level := _heading_level_from_class(attrs_map)):
-            self._active_heading = (level, 1, [])
+            anchors = []
+            _append_anchor(anchors, attrs_map.get("id", ""))
+            self._active_heading = (level, 1, [], anchors)
 
     def handle_endtag(self, tag: str) -> None:
         if tag in {"script", "style", "noscript", "svg"} and self._skip_depth:
@@ -317,15 +325,15 @@ class _HtmlHeadingParser(HTMLParser):
         if self._skip_depth or self._active_heading is None:
             return
 
-        level, depth, parts = self._active_heading
+        level, depth, parts, anchors = self._active_heading
         depth -= 1
         if depth:
-            self._active_heading = (level, depth, parts)
+            self._active_heading = (level, depth, parts, anchors)
             return
 
         text = _normalize_heading_text("".join(parts))
         if text:
-            self.headings.append(HtmlHeading(level=level, text=text))
+            self.headings.append(HtmlHeading(level=level, text=text, anchors=anchors))
         self._active_heading = None
 
     def handle_data(self, data: str) -> None:
@@ -333,11 +341,6 @@ class _HtmlHeadingParser(HTMLParser):
             return
         if self._active_heading is not None:
             self._active_heading[2].append(data)
-            return
-        if self.headings:
-            anchor = _normalize_heading_text(repair_mojibake(data))
-            if anchor and len(self.headings[-1].anchors) < 20:
-                self.headings[-1].anchors.append(anchor)
 
     def handle_entityref(self, name: str) -> None:
         self.handle_data(unescape(f"&{name};"))
@@ -424,6 +427,12 @@ def _heading_level_from_class(attrs_map: dict[str, str]) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _append_anchor(anchors: list[str], value: str) -> None:
+    value = value.strip()
+    if value and value not in anchors:
+        anchors.append(value)
+
+
 def _insert_missing_markdown_headings(lines: list[str], headings: list[HtmlHeading]) -> list[str]:
     output = list(lines)
     search_start = 0
@@ -444,6 +453,7 @@ def _insert_missing_markdown_headings(lines: list[str], headings: list[HtmlHeadi
             continue
         insertion_index, anchor_index = insertion_match
         output.insert(insertion_index, f"{'#' * heading.level} {normalized}")
+        _drop_next_duplicate_heading(output, insertion_index, heading.level, normalized)
         search_start = anchor_index + 2
     return output
 
@@ -465,6 +475,18 @@ def _heading_insertion_match(lines: list[str], heading: HtmlHeading, start_index
             if _line_contains_anchor(line, normalized_anchor):
                 return _previous_block_start(lines, index), index
     return None
+
+
+def _drop_next_duplicate_heading(lines: list[str], inserted_index: int, level: int, text: str) -> None:
+    for index in range(inserted_index + 1, len(lines)):
+        match = re.match(r"^\s{0,3}(#{1,6})\s+(.*\S)\s*$", lines[index])
+        if not match:
+            continue
+        current_level = len(match.group(1))
+        current_text = _normalize_heading_text(repair_mojibake(match.group(2)))
+        if current_level == level and current_text == text:
+            del lines[index]
+        return
 
 
 def _line_contains_anchor(line: str, anchor: str) -> bool:

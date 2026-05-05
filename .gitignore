@@ -5,6 +5,7 @@ venv/
 dist/
 build/
 *.egg-info/
+mirror-fresh/
 mirror-test/
 mirror-test-no-assets/
 mirror-sync*/

@@ -9,7 +9,7 @@ description = "Mirror HTML documentation into Markdown files with YAML indexes."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Dochive" }]
-dependencies = []
+dependencies = ["certifi>=2024.2.2"]
 
 [project.optional-dependencies]
 crawl4ai = ["crawl4ai>=0.8"]

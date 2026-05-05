@@ -156,20 +156,20 @@ async def _build_navigation_index(
             link_text = repair_mojibake(str(item.get("text") or item.get("title") or "")).strip()
             target_fetch_url = urljoin(entry.fetch_url, href)
             target = canonicalize_url(target_fetch_url)
+            if target == url:
+                continue
             if not _is_allowed_url(target, root_url, allowed_prefixes, config):
                 continue
 
             target_nav_path = extract_tocpath(target_fetch_url)
-            if not target_nav_path and target not in entries:
-                continue
-            nav_path, _nav_parent_url = _navigation_hint(
+            nav_path, nav_parent_url = _navigation_hint(
                 target,
                 target_nav_path=target_nav_path,
                 link_text=link_text,
                 current_url=url,
                 current_title=title,
             )
-            depth = _navigation_depth(nav_path, entry.depth + 1)
+            depth = entry.depth + 1
             if target not in entries and (depth > config.max_depth or len(entries) >= config.max_pages):
                 continue
             if target not in entries:
@@ -179,6 +179,7 @@ async def _build_navigation_index(
                     depth=depth,
                     order=len(entries) + 1,
                     discovered_from_url=url,
+                    nav_parent_url=url if not target_nav_path else None,
                 )
 
             _remember_navigation_hint(
@@ -199,6 +200,8 @@ async def _build_navigation_index(
                 nav_path_by_canonical=nav_path_by_canonical,
                 nav_parent_by_canonical=nav_parent_by_canonical,
             )
+            if nav_parent_url == url:
+                entries[target].depth = entry.depth + 1
             if target not in seen and entries[target].depth <= config.max_depth:
                 queue.append(target)
 
@@ -216,7 +219,18 @@ async def _fetch_pages_from_navigation_index(
 ) -> tuple[list[Page], list[MirrorIssue]]:
     pages: list[Page] = []
     issues: list[MirrorIssue] = []
+
     for entry in sorted(nav_index.values(), key=lambda item: item.order):
+        if entry.depth > config.max_depth:
+            continue
+        if len(pages) >= config.max_pages:
+            issues.append(MirrorIssue(
+                kind="max_pages_reached",
+                message=f"Stopped after {config.max_pages} pages",
+                severity="info",
+            ))
+            break
+
         result, issue = await _fetch_crawl_result(crawler, run_config, entry.fetch_url, "content")
         if issue:
             issues.append(issue)
@@ -356,12 +370,6 @@ def _link_tocpath(item: object, base_url: str) -> tuple[str, ...]:
     return extract_tocpath(urljoin(base_url, href)) if href else ()
 
 
-def _navigation_depth(nav_path: tuple[str, ...], fallback: int) -> int:
-    if nav_path:
-        return max(0, len(nav_path) - 1)
-    return fallback
-
-
 def _sync_navigation_entry(
     entry: NavigationEntry,
     *,
@@ -372,7 +380,6 @@ def _sync_navigation_entry(
     entry.fetch_url = fetch_url_by_canonical.get(entry.canonical_url, entry.fetch_url)
     entry.nav_path = nav_path_by_canonical.get(entry.canonical_url, entry.nav_path)
     entry.nav_parent_url = nav_parent_by_canonical.get(entry.canonical_url, entry.nav_parent_url)
-    entry.depth = _navigation_depth(entry.nav_path, entry.depth)
 
 
 def _prefer_nav_path(candidate: tuple[str, ...], current: tuple[str, ...] | None) -> bool:
