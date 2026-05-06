@@ -30,8 +30,8 @@ Improve the quality of generated Markdown before expanding the crawler further. 
 
 - `python -m compileall src`
 - `dochive mirror --source examples\local-html --out .\mirror-test --max-depth 3 --save-assets images,files`
-- Naumen smoke test with `--max-depth 0 --max-pages 1 --scope subtree`
-- Verified generated Naumen Markdown has:
+- example documentation smoke test with `--max-depth 0 --max-pages 1 --scope subtree`
+- Verified generated example documentation Markdown has:
   - `Account count: 0`
   - `Logout count: 0`
   - readable Russian title in UTF-8
@@ -40,4 +40,4 @@ Improve the quality of generated Markdown before expanding the crawler further. 
 
 Selector quality depends on the source documentation HTML. A site-specific selector may still be needed for best results.
 
-Robots.txt handling is intentionally not enabled inside Crawl4AI yet because it returned zero pages without actionable diagnostics in the Naumen smoke test. This should be implemented with explicit preflight and `errors.yaml` reporting.
+Robots.txt handling is intentionally not enabled inside Crawl4AI yet because it returned zero pages without actionable diagnostics in the example documentation smoke test. This should be implemented with explicit preflight and `errors.yaml` reporting.

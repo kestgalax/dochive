@@ -4,7 +4,7 @@ Status: completed
 
 ## Intent
 
-Make each mirror run easier to inspect before deeper work on assets, errors, incremental sync, and bot/search integration.
+Make each mirror run easier to inspect before deeper work on assets, errors, incremental sync, and future search or assistant integrations.
 
 ## Changes
 

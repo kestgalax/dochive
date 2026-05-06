@@ -4,7 +4,7 @@ Status: completed
 
 ## Intent
 
-Preserve the article hierarchy when documentation generators encode headings in non-standard or tool-specific HTML. The motivating Naumen SD Pro page used normal `h2` elements with MadCap autonumber spans and lower-level headings as styled paragraphs.
+Preserve the article hierarchy when documentation generators encode headings in non-standard or tool-specific HTML. The motivating Example Docs page used normal `h2` elements with MadCap autonumber spans and lower-level headings as styled paragraphs.
 
 ## Changes
 
@@ -19,7 +19,7 @@ Preserve the article hierarchy when documentation generators encode headings in 
 
 - `src/dochive/html_extract.py`
 - `src/dochive/web_source.py`
-- `mirror/www.naumen.ru/docs/sd/nsdpro/content/admin_n/deployment_schemes.md`
+- `mirror/docs.example.com/docs/product_docs/content/deployment/profiles.md`
 - `README.md`
 - `docs/USAGE.md`
 - `docs/ROADMAP.md`
@@ -30,11 +30,11 @@ Preserve the article hierarchy when documentation generators encode headings in 
 - Ordinary web mirror smoke test without `--content-selector`:
   - `--max-depth 0`
   - `--max-pages 1`
-- Verified generated `deployment_schemes.md` contains:
-  - `# Типовые схемы развертывания`
-  - `## Типы компонентов систем SD Pro`
-  - `## Типовые наборы компонентов систем на базе SD Pro`
-  - four `#### Типовая конфигурация ...` headings
+- Verified generated `profiles.md` contains:
+  - `# Deployment profiles`
+  - `## System component types`
+  - `## Recommended component sets`
+  - nested `#### Deployment profile ...` headings
 - Verified the page still has the expected tables and images.
 - Verified no headings are emitted with double spaces after `#`.
 

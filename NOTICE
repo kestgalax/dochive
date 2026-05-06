@@ -1,0 +1,15 @@
+Dochive
+Copyright (c) 2026 kestgalax
+
+This product includes software developed by the Dochive project:
+https://github.com/kestgalax/dochive
+
+Third-party software:
+
+- certifi provides Mozilla's CA Bundle for TLS certificate verification.
+  certifi is licensed under the Mozilla Public License 2.0.
+  https://github.com/certifi/python-certifi
+
+- Optional web crawling functionality may use Crawl4AI,
+  an open-source project by UncleCode:
+  https://github.com/unclecode/crawl4ai

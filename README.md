@@ -1,5 +1,7 @@
 # Dochive
 
+[English](README.md) | [Русский](README.ru.md)
+
 CLI tool for mirroring HTML documentation into a Markdown-first repository:
 
 - Markdown page files with YAML frontmatter
@@ -104,4 +106,28 @@ If HTTPS asset downloads fail with `CERTIFICATE_VERIFY_FAILED`, make sure the cr
 
 - [Roadmap](docs/ROADMAP.md)
 - [Usage](docs/USAGE.md)
+- [Usage in Russian](docs/USAGE.ru.md)
 - [Stage artifacts](docs/stages/)
+
+## License
+
+Dochive is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+
+Please preserve attribution to this repository when using or redistributing the project:
+https://github.com/kestgalax/dochive
+
+## Third-party notices
+
+Dochive uses or may use third-party open-source software:
+
+- certifi: MPL-2.0; provides Mozilla's CA Bundle for TLS certificate verification.
+- Crawl4AI: Apache-2.0; used only when installing the optional `crawl4ai` extra.
+
+Optional web crawling functionality may use Crawl4AI, an open-source project by UncleCode:
+https://github.com/unclecode/crawl4ai
+
+See [NOTICE](NOTICE) for attribution details.
+
+## Responsible Use
+
+Dochive mirrors and converts documentation content. Make sure you have the right to copy, convert, store, or redistribute any third-party documentation before publishing mirrored output.
