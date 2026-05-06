@@ -2,7 +2,7 @@
 
 ## Intent
 
-Build an OpenViking-inspired context layer around the documentation mirror without making vector search a requirement. The mirror should remain Git-friendly, observable, and deterministic, while still leaving room for optional LLM-assisted retrieval when keyword and structural search are not enough.
+Plan an OpenViking-inspired context layer around the documentation mirror without making vector search a requirement. The current product provides lexical `query`; this document describes planned context indexing, recursive retrieval, and optional LLM-assisted retrieval.
 
 ## Inspiration From OpenViking
 
@@ -79,20 +79,20 @@ Draft `context_index.jsonl` record:
 
 ```json
 {
-  "uri": "mirror://www.naumen.ru/docs/sd/nsdpro/content/admin_n/deployment_schemes.md#типовая-конфигурация-от-500-до-1000",
+  "uri": "mirror://docs.example.com/docs/product_docs/content/deployment/profiles.md#medium-deployment-profile",
   "kind": "section",
   "level": "L2",
-  "path": "docs/sd/nsdpro/content/admin_n/deployment_schemes.md",
-  "source_url": "https://www.naumen.ru/docs/sd/nsdpro/Content/admin_n/deployment_schemes.htm",
-  "title": "Типовые схемы развертывания",
+  "path": "docs/product_docs/content/deployment/profiles.md",
+  "source_url": "https://docs.example.com/product_docs/Content/deployment/profiles.htm",
+  "title": "Deployment profiles",
   "headings": [
-    "Типовые схемы развертывания",
-    "Типовые наборы компонентов систем на базе SD Pro",
-    "Типовая конфигурация от 500 до 1000 одновременных пользователей (sd_pro_medium)"
+    "Deployment profiles",
+    "System component sets",
+    "Medium deployment profile"
   ],
-  "abstract": "Состав компонентов SD Pro для нагрузки 500-1000 пользователей.",
+  "abstract": "Component set for a medium example documentation deployment.",
   "text": "...",
-  "terms": ["sd", "pro", "backend", "frontend", "500", "1000", "rdbms"],
+  "terms": ["backend", "frontend", "database", "deployment", "profile"],
   "links": [],
   "assets": ["_assets/images/003.png"],
   "content_hash": "sha256:..."
@@ -153,18 +153,18 @@ Each retrieval result should explain itself:
   "uri": "mirror://...",
   "score": 42.5,
   "why": [
-    "matched heading: Типовая конфигурация от 500 до 1000...",
-    "matched terms: 500, 1000, SD Pro Backend",
-    "matched table rows: SD Pro Backend, RDBMS Slave"
+    "matched heading: Medium deployment profile",
+    "matched terms: deployment, backend, database",
+    "matched table rows: backend service, database"
   ]
 }
 ```
 
-This keeps the retrieval chain inspectable by humans and by downstream LLM agents.
+This planned trace keeps the retrieval chain inspectable by humans and by downstream LLM agents.
 
 ## Optional LLM-Assisted Retrieval
 
-The project should not categorically exclude LLM-based search. A hybrid design can be useful, especially for Russian documentation, domain synonyms, and queries that do not share vocabulary with the source text.
+This is planned, experimental behavior. The project should not categorically exclude LLM-based search. A hybrid design can be useful, especially for Russian documentation, domain synonyms, and queries that do not share vocabulary with the source text.
 
 The baseline should remain deterministic, but an optional local or low-cost LLM can help with:
 
@@ -219,19 +219,19 @@ Likely first implementation:
 - Keep image interpretation out of `mirror` and `index`.
 - Add on-demand multimodal interpretation later, scoped to images selected by retrieval.
 
-## Proposed Commands
+## Proposed Future Commands
 
 ```powershell
-dochive index --root .\mirror\www.naumen.ru
-dochive retrieve --root .\mirror\www.naumen.ru --text "какая схема для 700 пользователей" --format json --trace
-dochive ask --root .\mirror\www.naumen.ru --text "какая схема для 700 пользователей"
+dochive index --root .\mirror\docs.example.com
+dochive retrieve --root .\mirror\docs.example.com --text "medium deployment profile" --format json --trace
+dochive ask --root .\mirror\docs.example.com --text "medium deployment profile"
 ```
 
 Optional later:
 
 ```powershell
-dochive retrieve --root .\mirror\www.naumen.ru --text "..." --llm-rerank
-dochive enrich-images --root .\mirror\www.naumen.ru --scope selected
+dochive retrieve --root .\mirror\docs.example.com --text "..." --llm-rerank
+dochive enrich-images --root .\mirror\docs.example.com --scope selected
 ```
 
 ## TUI Position

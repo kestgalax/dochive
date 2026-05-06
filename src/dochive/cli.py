@@ -159,7 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
     catalog = subparsers.add_parser("catalog", help="Show catalog file locations for a mirror.")
     catalog.add_argument("--root", required=True, type=Path, help="Mirror root directory.")
 
-    query = subparsers.add_parser("query", help="Search a mirrored Markdown knowledge base without vectors.")
+    query = subparsers.add_parser("query", help="Run lexical search over a mirrored Markdown knowledge base.")
     query.add_argument("--root", required=True, type=Path, help="Mirror root directory.")
     query.add_argument("--text", required=True, help="Search query.")
     query.add_argument("--limit", type=int, default=10, help="Maximum number of hits.")

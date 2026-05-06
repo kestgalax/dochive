@@ -11,7 +11,7 @@ Improve media handling for documentation pages that embed screenshots as Markdow
 - Extract image assets from generated Markdown, not only Crawl4AI `media`.
 - Treat linked full-size image files as assets.
 - Keep deduplication by asset kind and source URL.
-- Verify Naumen QuickStart `2.htm` with `--save-assets images`.
+- Verify example quick-start `2.htm` with `--save-assets images`.
 
 ## Files Touched
 
@@ -25,7 +25,7 @@ Improve media handling for documentation pages that embed screenshots as Markdow
 - `python -m compileall src`
 - Local fixture smoke:
   - `dochive mirror --source examples\local-html --out .\mirror-test --max-depth 3 --save-assets images,files`
-- Naumen `2.htm` targeted smoke:
+- example `2.htm` targeted smoke:
   - `assets_total: 17`
   - `assets_localized: 17`
 - Markdown image thumbnail URLs rewritten to `_assets/images/...`
@@ -36,7 +36,7 @@ Improve media handling for documentation pages that embed screenshots as Markdow
   - generated Markdown contains `<img src="../../../../../_assets/images/2_01-690038081ef1.png" alt="" />`
   - generated HTML image tags are emitted as standalone HTML blocks with blank lines before and after
   - generated Markdown contains no `![...]` image syntax for localized images by default
-- Main Naumen QuickStart mirror regenerated with:
+- Main example quick-start mirror regenerated with:
   - `--max-depth 1`
   - `--max-pages 20`
   - `--scope subtree`

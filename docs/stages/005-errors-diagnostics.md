@@ -33,7 +33,7 @@ Large documentation mirrors need explicit diagnostics. A successful CLI exit can
   - `local_link_missing`
   - `asset_missing`
 - Verified `summary.yaml` includes `warnings: 2`.
-- Naumen web smoke with `--max-depth 0 --max-pages 1 --scope subtree` writes unresolved internal links to `errors.yaml`.
+- example web smoke with `--max-depth 0 --max-pages 1 --scope subtree` writes unresolved internal links to `errors.yaml`.
 
 ## Known Limitations
 

@@ -10,7 +10,7 @@ Keep Markdown files focused on article content while preserving documentation st
 
 - Trim repeated site navigation before the first article heading.
 - Preserve a breadcrumb line immediately before the heading when present.
-- Remove the Naumen legal footer from article Markdown.
+- Remove the generic legal footer from article Markdown.
 - Repair common UTF-8 mojibake before cleanup.
 - Read PNG, JPEG, and GIF intrinsic dimensions from downloaded/copied image files.
 - Add dimensions to generated HTML image tags.
@@ -32,13 +32,13 @@ Keep Markdown files focused on article content while preserving documentation st
 ## Verification
 
 - `python -m py_compile` for changed Python modules.
-- Naumen QuickStart mirror regenerated with:
+- example quick-start mirror regenerated with:
   - `--max-depth 1`
   - `--max-pages 20`
   - `--scope subtree`
   - `--save-assets images`
 - Verified `2.md` starts with the breadcrumb and article heading instead of site navigation.
-- Verified `2.md` no longer contains the Naumen legal footer.
+- Verified `2.md` no longer contains the generic legal footer.
 - Verified generated image tags include intrinsic dimensions, for example:
   - `width="1427" height="617"`
 - Verified max-width mode with:
@@ -50,4 +50,4 @@ Keep Markdown files focused on article content while preserving documentation st
 
 ## Known Limitations
 
-The article cleanup is heuristic. It is intentionally conservative: it trims obvious repeated page chrome before the first H1 and the known Naumen legal footer. Other documentation sites should still use `--content-selector` and `--exclude-selector` when they have stable article containers.
+The article cleanup is heuristic. It is intentionally conservative: it trims obvious repeated page chrome before the first H1 and generic legal/footer/support-feedback blocks. Documentation sites should still use `--content-selector` and `--exclude-selector` when they have stable article containers.

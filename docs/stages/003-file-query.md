@@ -4,7 +4,7 @@ Status: completed
 
 ## Intent
 
-Add a simple no-vector search command that works directly over `_catalog/pages.yaml`, `_index.yaml`, and Markdown files. This creates the base behavior for future Telegram bot consultation.
+Add a simple lexical search command that works directly over `_catalog/pages.yaml`, `_index.yaml`, and Markdown files. This creates the base behavior for possible future bot or assistant integrations.
 
 ## Changes
 
@@ -27,4 +27,4 @@ Add a simple no-vector search command that works directly over `_catalog/pages.y
 
 ## Known Limitations
 
-The first version is lexical search only. It does not summarize answers and does not yet perform hierarchical LLM navigation.
+The first version is lexical search only. It does not summarize answers and does not perform context indexing, recursive retrieval, vector search, or hierarchical LLM navigation; those remain roadmap items.

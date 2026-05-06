@@ -360,11 +360,7 @@ def _drop_footer_chrome(text: str) -> str:
     lines = text.splitlines()
     for index, line in enumerate(lines):
         normalized = _line_text(line)
-        if (
-            "Обращаем ваше внимание" in normalized
-            or "публичной оферт" in normalized
-            or "ctrl+enter" in normalized
-        ):
+        if _looks_like_footer_notice(normalized):
             start = _footer_start_index(lines, index)
             return "\n".join(lines[:start])
     return text
@@ -373,9 +369,44 @@ def _drop_footer_chrome(text: str) -> str:
 def _footer_start_index(lines: list[str], index: int) -> int:
     for candidate in range(index - 1, max(index - 4, -1), -1):
         normalized = _line_text(lines[candidate])
-        if "Страница продукта" in normalized or "products/service_desk_pro" in normalized:
+        if _looks_like_footer_heading_or_link(normalized):
             return candidate
     return index
+
+
+def _looks_like_footer_notice(line: str) -> bool:
+    lowered = line.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "legal notice",
+            "public offer",
+            "terms of use",
+            "ctrl+enter",
+            "обращаем ваше внимание",
+            "публичной оферт",
+            "сообщить об ошибке",
+        )
+    )
+
+
+def _looks_like_footer_heading_or_link(line: str) -> bool:
+    lowered = line.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "product page",
+            "documentation home",
+            "support",
+            "feedback",
+            "legal",
+            "terms",
+            "страница продукта",
+            "главная документации",
+            "техническая поддержка",
+            "обратная связь",
+        )
+    )
 
 
 def _line_text(line: str) -> str:

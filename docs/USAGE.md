@@ -214,15 +214,15 @@ Dochive writes nested pages in the layout expected by Gramax. When a crawled pag
 Before child pages are known, a page path would look flat:
 
 ```text
-docs/sd/nsdpro/content/change_list/beta_35.md
+docs/product_docs/content/release_notes/version_35.md
 ```
 
 With crawled children, the generated mirror becomes:
 
 ```text
-docs/sd/nsdpro/content/change_list/beta_35/_index.md
-docs/sd/nsdpro/content/change_list/beta_35/kakaya-to-stranica.md
-docs/sd/nsdpro/content/change_list/change_list_arch.md
+docs/product_docs/content/release_notes/version_35/_index.md
+docs/product_docs/content/release_notes/version_35/known_issues.md
+docs/product_docs/content/release_notes/archive.md
 ```
 
 Internal Markdown links, page frontmatter, `_catalog/*.yaml`, sync reports, and folder `_index.yaml` files all use the final `_index.md` paths. Page frontmatter also receives `order` based on the source navigation order, so Gramax can sort sibling pages the same way as the original documentation.
@@ -258,7 +258,7 @@ By default, linked screenshots are written in Gramax image form:
 <image src="./example.png" crop="0,0,100,100" scale="100" width="1427px" height="617px" float="center"/>
 ```
 
-The default `--image-size-mode intrinsic` reads the real downloaded image dimensions and writes them into the Gramax image tag. Saved media is stored next to the Markdown page: regular `beta_35.md` pages use `beta_35/`, while Gramax head pages use the same folder as `beta_35/_index.md`.
+The default `--image-size-mode intrinsic` reads the real downloaded image dimensions and writes them into the Gramax image tag. Saved media is stored next to the Markdown page: regular `version_35.md` pages use `version_35/`, while Gramax head pages use the same folder as `version_35/_index.md`.
 
 For wide screenshots, cap rendered width while preserving aspect ratio:
 
@@ -295,7 +295,7 @@ Use `--image-link-mode linked` only when you explicitly need standard Markdown l
 HTML `<video>` blocks are preserved in Markdown as Gramax video tags:
 
 ```html
-<video path="./change_list_30_video/example.mp4"/>
+<video path="./release_notes_video/example.mp4"/>
 ```
 
 Without asset saving, video tags keep the original remote URL. To copy MP4 sources from HTML `<video>` blocks into the mirror and rewrite video `path` attributes to the page-local media folder, include `videos` in `--save-assets`:
@@ -337,7 +337,7 @@ Disable cleanup only for diagnostics:
 dochive mirror --source .\site-html --out .\mirror --no-clean-markdown
 ```
 
-By default, cleanup also trims repeated page chrome before the first article heading and removes the Naumen legal footer. Site-wide navigation remains available through `_index.yaml` and `_catalog/*.yaml`; it is not duplicated inside every Markdown article.
+By default, cleanup also trims repeated page chrome before the first article heading and removes generic legal/footer/support-feedback blocks. Site-wide navigation remains available through `_index.yaml` and `_catalog/*.yaml`; it is not duplicated inside every Markdown article.
 
 ## Heading Recovery
 
@@ -346,8 +346,8 @@ Some documentation generators do not express all headings as plain `h2`/`h3` ele
 Supported patterns include:
 
 ```html
-<p class="H4">Типовая конфигурация до 500 одновременных пользователей (sd_pro_small)</p>
-<h2 data-mc-autonum=""><span class="autonumber"><span></span></span>Типы компонентов систем SD Pro</h2>
+<p class="H4">Supported deployment profile</p>
+<h2 data-mc-autonum=""><span class="autonumber"><span></span></span>System component types</h2>
 ```
 
 The web crawler uses the full HTML response for this recovery because Crawl4AI `cleaned_html` can omit some MadCap `h2 data-mc-autonum` headings. The local HTML parser also treats `p` and `div` classes named `H1` through `H6` as Markdown headings.
@@ -357,7 +357,7 @@ No special CLI flag is required. If recovered headings do not appear after a nor
 ## Inspect Catalogs
 
 ```powershell
-dochive catalog --root .\mirror\www.naumen.ru
+dochive catalog --root .\mirror\docs.example.com
 ```
 
 Important files:
@@ -373,15 +373,15 @@ _catalog/assets.yaml
 _catalog/errors.yaml
 ```
 
-Each folder also receives `_index.yaml` for hierarchical LLM navigation.
+Each folder also receives `_index.yaml` for deterministic hierarchy and catalog navigation. LLM-oriented retrieval is planned in the [roadmap](ROADMAP.md).
 
-## Search Without Vectors
+## Lexical Search
 
 ```powershell
-dochive query --root .\mirror\www.naumen.ru --text "быстрый старт" --limit 5
+dochive query --root .\mirror\docs.example.com --text "quick start" --limit 5
 ```
 
-This performs lexical file search over Markdown and YAML. It is the first retrieval layer for a future Telegram bot or LLM assistant.
+`dochive query` currently performs lexical file search over Markdown and YAML only. Future context indexing, recursive retrieval, vector/non-vector retrieval strategy, Telegram bot, and LLM assistant ideas are tracked in the [roadmap](ROADMAP.md).
 
 ## Inspect Incremental Sync
 
@@ -425,7 +425,7 @@ Preview the Git actions first:
 
 ```powershell
 dochive publish `
-  --root .\mirror\www.naumen.ru `
+  --root .\mirror\docs.example.com `
   --dry-run `
   --init `
   --message "Update documentation mirror"
@@ -435,7 +435,7 @@ Commit locally:
 
 ```powershell
 dochive publish `
-  --root .\mirror\www.naumen.ru `
+  --root .\mirror\docs.example.com `
   --init `
   --message "Update documentation mirror"
 ```
@@ -444,7 +444,7 @@ Push after commit only when a remote is already configured:
 
 ```powershell
 dochive publish `
-  --root .\mirror\www.naumen.ru `
+  --root .\mirror\docs.example.com `
   --message "Update documentation mirror" `
   --push
 ```

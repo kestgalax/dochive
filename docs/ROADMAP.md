@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build a CLI-first documentation mirroring tool that converts HTML documentation into a Git-friendly Markdown knowledge base with YAML metadata and file-based LLM search.
+Build a CLI-first documentation mirroring tool that converts HTML documentation into a Git-friendly Markdown knowledge base with YAML metadata. Current search is lexical; context indexing, recursive retrieval, and LLM-assisted workflows are planned roadmap directions.
 
 ## Product Shape
 
@@ -20,7 +20,7 @@ Optional later:
 dochive tui
 ```
 
-Context/retrieval direction:
+Planned context/retrieval direction:
 
 ```powershell
 dochive index --root .\mirror\<site>
@@ -72,7 +72,7 @@ Deliverables:
 
 - `query` command using `_index.yaml`, `_catalog/pages.yaml`, and plain Markdown.
 - No vector database.
-- Useful output for Telegram bot integration.
+- Useful lexical output that can later feed Telegram bot or assistant integrations.
 
 ### Stage 5. Publish
 
