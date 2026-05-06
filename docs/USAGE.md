@@ -1,5 +1,7 @@
 # Dochive Usage
 
+[English](USAGE.md) | [Русский](USAGE.ru.md)
+
 ## Requirements
 
 - Python 3.10 or newer
