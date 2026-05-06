@@ -3,7 +3,7 @@
 ## Requirements
 
 - Python 3.10 or newer
-- Git
+- Git, only for source checkout or `dochive publish`
 - Optional: Crawl4AI dependencies for JavaScript-rendered web crawling
 
 Dochive is a Python package with a `dochive` console command. The recommended setup is the same on Windows, Linux, and macOS: create a virtual environment, install the package, then run `dochive`.
@@ -54,6 +54,16 @@ During development, editable installation keeps the `dochive` command pointed at
 python -m dochive --help
 ```
 
+## Command Overview
+
+Dochive exposes five commands:
+
+- `dochive mirror`: mirror a URL, local HTML file, or local HTML directory into Markdown and YAML catalogs.
+- `dochive structure`: discover and save a web navigation structure before content mirroring.
+- `dochive catalog`: print the expected catalog file paths for a mirror.
+- `dochive query`: run lexical search over mirrored Markdown and YAML files.
+- `dochive publish`: commit and optionally push a mirror directory with Git.
+
 ### macOS Homebrew Python
 
 Homebrew Python does not allow package installs into the global interpreter. If `python3 -m pip install -e .` fails with `externally-managed-environment`, create a virtual environment first:
@@ -97,7 +107,7 @@ For all browsers (Chromium, Firefox, WebKit):
 playwright install
 ```
 
-Then run web crawls with `--render-js`.
+Then run web crawls with `--render-js`. Local HTML mirroring still works without Crawl4AI.
 
 Dochive sets workspace-local Crawl4AI defaults during web crawling. If you call Crawl4AI tools directly, you may set these variables yourself.
 
@@ -126,10 +136,23 @@ dochive structure \
   --source "https://docs.example.com/start.htm" \
   --out ./mirror \
   --max-depth 3 \
-  --scope subtree
+  --scope subtree \
+  --structure-mode auto
 ```
 
-The command writes `_catalog/structure.yaml` under the mirror root. It stores known source URLs, navigation paths, parent links, order, placeholder status, and final Gramax paths. Later `dochive mirror` runs against the same output directory reuse this file: missing pages remain placeholders, and separately mirrored sections fill the existing paths instead of creating a second layout.
+The command writes `_catalog/structure.yaml` under the mirror root. It stores known source URLs, navigation paths, parent links, order, placeholder status, and final Gramax paths. Later runs of `dochive mirror` against the same output directory reuse this file: missing pages remain placeholders, and separately mirrored sections fill the existing paths instead of creating a second layout.
+
+`--structure-mode auto` detects MadCap WebHelp navigation from `Data/HelpSystem.xml` and its TOC chunks when available. Use `--structure-mode toc` to require that TOC, or `--structure-mode links` to use link-based discovery. In TOC mode, `--scope subtree` means the selected user-visible TOC branch, not just the URL directory.
+
+Use `--include-url-prefix` when a documentation branch legitimately links outside the selected subtree but should still be eligible:
+
+```bash
+dochive structure \
+  --source "https://docs.example.com/product/start.htm" \
+  --out ./mirror \
+  --scope subtree \
+  --include-url-prefix "https://docs.example.com/shared/"
+```
 
 ## Mirror Local HTML
 
@@ -140,8 +163,10 @@ dochive mirror `
   --source .\examples\local-html `
   --out .\mirror-test `
   --max-depth 3 `
-  --save-assets images,files
+  --save-assets images
 ```
+
+`--source` may point to either a directory or a single `.html`/`.htm` file. Local mirroring uses the filesystem and does not require `--render-js`.
 
 ## Mirror A Web Documentation Subtree
 
@@ -155,6 +180,7 @@ dochive mirror \
   --max-depth 1 \
   --max-pages 20 \
   --scope subtree \
+  --structure-mode auto \
   --save-assets images \
   --image-size-mode max-width \
   --image-max-width 900
@@ -170,12 +196,14 @@ dochive mirror `
   --max-depth 1 `
   --max-pages 20 `
   --scope subtree `
+  --structure-mode auto `
   --save-assets images `
   --image-size-mode max-width `
   --image-max-width 900
 ```
 
 Use `--scope subtree` for a controlled crawl. Use `--scope domain` only when you intentionally want the whole domain to be eligible.
+For focused crawls that need shared assets or a common pages directory, add one or more `--include-url-prefix` values.
 
 ## Output Layout
 
@@ -219,6 +247,8 @@ Reserved modes:
 - `--anti-bot aggressive`: planned to add proxy escalation, retry rounds, and optional fallback fetch providers.
 
 These reserved modes are accepted by the CLI choices, but intentionally stop with a clear error until the required runtime configuration is implemented. Aggressive mode will need a proxy list, probably through `--proxy` and/or a `DOCHIVE_PROXIES` environment variable, plus an optional fallback fetch provider for sites that block all browser attempts.
+
+## Image Output
 
 By default, linked screenshots are written in Gramax image form:
 
@@ -266,14 +296,14 @@ HTML `<video>` blocks are preserved in Markdown as Gramax video tags:
 <video path="./change_list_30_video/example.mp4"/>
 ```
 
-Without asset saving, video tags keep the original remote URL. To copy MP4 files into the mirror and rewrite video `path` attributes to the page-local media folder, include `videos` in `--save-assets`:
+Without asset saving, video tags keep the original remote URL. To copy MP4 sources from HTML `<video>` blocks into the mirror and rewrite video `path` attributes to the page-local media folder, include `videos` in `--save-assets`:
 
 ```powershell
 dochive mirror `
   --source "url" `
   --out .\mirror `
   --render-js `
-  --save-assets images,videos,files
+  --save-assets images,videos
 ```
 
 ## Improve Extraction With Selectors

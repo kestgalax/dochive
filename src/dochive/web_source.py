@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 from .html_extract import extract_html_anchor_headings, extract_html_videos, inject_html_videos, promote_markdown_headings
+from .madcap_toc import discover_madcap_structure
 from .markdown_normalizer import normalize_markdown
 from .media_utils import extract_markdown_assets, merge_assets
 from .models import Asset, MirrorConfig, MirrorIssue, MirrorRun, Page, StructureEntry, StructureRun
@@ -32,6 +33,7 @@ class NavigationEntry:
 
 def crawl_web(config: MirrorConfig) -> MirrorRun:
     _configure_crawl4ai_environment(config)
+    _validate_structure_mode(config.structure_mode)
     try:
         import crawl4ai  # noqa: F401
     except ImportError as exc:
@@ -44,6 +46,14 @@ def crawl_web(config: MirrorConfig) -> MirrorRun:
 
 def build_web_structure(config: MirrorConfig) -> StructureRun:
     _configure_crawl4ai_environment(config)
+    _validate_structure_mode(config.structure_mode)
+    if config.structure_mode != "links":
+        run = discover_madcap_structure(config)
+        if run.entries or config.structure_mode == "toc":
+            if config.structure_mode == "toc" and run.issues:
+                raise RuntimeError(run.issues[0].message)
+            return run
+
     try:
         import crawl4ai  # noqa: F401
     except ImportError as exc:
@@ -63,11 +73,12 @@ def _configure_crawl4ai_environment(config: MirrorConfig) -> None:
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 
-async def _crawl_web_async(config: MirrorConfig) -> list[Page]:
+async def _crawl_web_async(config: MirrorConfig) -> MirrorRun:
     from crawl4ai import AsyncWebCrawler
     from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig
 
     _validate_anti_bot_mode(config.anti_bot_mode)
+    _validate_structure_mode(config.structure_mode)
 
     root_url = canonicalize_url(config.source)
     allowed_prefixes = _allowed_prefixes(root_url, config)
@@ -96,6 +107,25 @@ async def _crawl_web_async(config: MirrorConfig) -> list[Page]:
     )
 
     async with AsyncWebCrawler(config=browser_config) as crawler:
+        if config.structure_mode != "links":
+            structure_run = discover_madcap_structure(config)
+            if structure_run.entries:
+                pages, page_issues = await _fetch_pages_from_structure_entries(
+                    crawler,
+                    run_config,
+                    config,
+                    structure_run.entries,
+                    root_url=root_url,
+                    allowed_prefixes=allowed_prefixes,
+                )
+                issues.extend(structure_run.issues)
+                issues.extend(page_issues)
+                return MirrorRun(pages=pages, issues=issues)
+            if config.structure_mode == "toc":
+                message = structure_run.issues[0].message if structure_run.issues else "MadCap TOC discovery failed."
+                raise RuntimeError(message)
+            issues.extend(structure_run.issues)
+
         nav_index, nav_issues = await _build_navigation_index(
             crawler,
             run_config,
@@ -124,6 +154,7 @@ async def _build_web_structure_async(config: MirrorConfig) -> StructureRun:
     from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig
 
     _validate_anti_bot_mode(config.anti_bot_mode)
+    _validate_structure_mode(config.structure_mode)
 
     root_fetch_url = _structure_root_fetch_url(config.source)
     root_url = canonicalize_url(root_fetch_url)
@@ -388,6 +419,71 @@ async def _fetch_pages_from_navigation_index(
     return pages, issues
 
 
+async def _fetch_pages_from_structure_entries(
+    crawler: object,
+    run_config: object,
+    config: MirrorConfig,
+    entries: list[StructureEntry],
+    *,
+    root_url: str,
+    allowed_prefixes: tuple[str, ...],
+) -> tuple[list[Page], list[MirrorIssue]]:
+    pages: list[Page] = []
+    issues: list[MirrorIssue] = []
+    fetched_pages = 0
+
+    for entry in sorted(entries, key=lambda item: item.order):
+        if fetched_pages >= config.max_pages:
+            pages.append(_placeholder_page_from_structure_entry(entry))
+            continue
+
+        result, issue = await _fetch_crawl_result(crawler, run_config, entry.fetch_url, "content")
+        if issue:
+            issues.append(issue)
+            pages.append(_placeholder_page_from_structure_entry(entry))
+            continue
+
+        fetched_pages += 1
+        metadata = getattr(result, "metadata", {}) or {}
+        title = entry.title or repair_mojibake(metadata.get("title", ""))
+        markdown_obj = getattr(result, "markdown", "")
+        markdown = getattr(markdown_obj, "raw_markdown", None) or str(markdown_obj or "")
+        html = getattr(result, "html", None) or getattr(result, "cleaned_html", "") or ""
+        if html:
+            markdown = promote_markdown_headings(markdown, html)
+            markdown = inject_html_videos(markdown, html, entry.fetch_url)
+        anchor_headings = extract_html_anchor_headings(html) if html else {}
+        markdown = normalize_markdown(
+            markdown,
+            clean=config.clean_markdown,
+            extra_noise_lines=config.noise_lines,
+            anchor_headings=anchor_headings,
+        )
+        links = getattr(result, "links", {}) or {}
+        media = getattr(result, "media", {}) or {}
+        internal, external = _extract_page_links(links, entry.fetch_url, root_url, allowed_prefixes, config)
+        assets = _extract_page_assets(media, html, markdown, entry.fetch_url)
+
+        pages.append(
+            Page(
+                source_url=entry.fetch_url,
+                canonical_url=entry.canonical_url,
+                title=title,
+                description=repair_mojibake(metadata.get("description", "")),
+                markdown=markdown,
+                depth=entry.depth,
+                nav_parent_url=entry.nav_parent_url,
+                nav_path=entry.nav_path,
+                links_internal=internal,
+                links_external=external,
+                anchor_headings=anchor_headings,
+                assets=assets,
+                status_code=getattr(result, "status_code", 200) or 200,
+            )
+        )
+    return pages, issues
+
+
 def _navigation_entries_to_structure(
     nav_index: dict[str, NavigationEntry],
     *,
@@ -635,6 +731,19 @@ def _placeholder_markdown(title: str, source_url: str) -> str:
     )
 
 
+def _placeholder_page_from_structure_entry(entry: StructureEntry) -> Page:
+    return Page(
+        source_url=entry.fetch_url,
+        canonical_url=entry.canonical_url,
+        title=entry.title,
+        markdown=_placeholder_markdown(entry.title, entry.fetch_url),
+        depth=entry.depth,
+        nav_parent_url=entry.nav_parent_url,
+        nav_path=entry.nav_path,
+        placeholder=True,
+    )
+
+
 def _navigation_hint(
     target: str,
     *,
@@ -783,6 +892,12 @@ def _validate_anti_bot_mode(mode: str) -> None:
             "Use `--anti-bot basic` until proxies and fallback providers are configured."
         )
     raise RuntimeError(f"Unsupported anti-bot mode: {mode}")
+
+
+def _validate_structure_mode(mode: str) -> None:
+    if mode in {"auto", "toc", "links"}:
+        return
+    raise RuntimeError(f"Unsupported structure mode: {mode}")
 
 
 def _unique(values: list[str]) -> list[str]:

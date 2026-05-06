@@ -20,3 +20,4 @@ tmp*/
 !/tests/test_url_utils.py
 main_page/
 .DS_Store
+.pytest_cache

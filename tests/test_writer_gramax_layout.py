@@ -517,6 +517,51 @@ def test_writer_preserves_other_mirrored_sections_between_runs(tmp_path: Path) -
     assert 'deleted:\n  []' in (root / "_catalog" / "sync.yaml").read_text(encoding="utf-8")
 
 
+def test_writer_preserves_same_folder_pages_between_single_page_runs(tmp_path: Path) -> None:
+    first_url = "https://example.com/docs/section/first.htm"
+    second_url = "https://example.com/docs/section/second.htm"
+
+    root = write_mirror(
+        [
+            Page(
+                source_url=first_url,
+                canonical_url=first_url,
+                title="First",
+                markdown="First content.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=first_url, out_dir=tmp_path),
+    )
+    first_path = root / "docs" / "section" / "first.md"
+
+    assert first_path.exists()
+
+    write_mirror(
+        [
+            Page(
+                source_url=second_url,
+                canonical_url=second_url,
+                title="Second",
+                markdown="Second content.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=second_url, out_dir=tmp_path),
+    )
+
+    pages_catalog = (root / "_catalog" / "pages.yaml").read_text(encoding="utf-8")
+    section_index = (root / "docs" / "section" / "_index.yaml").read_text(encoding="utf-8")
+
+    assert first_path.exists()
+    assert (root / "docs" / "section" / "second.md").exists()
+    assert 'path: "docs/section/first.md"' in pages_catalog
+    assert 'path: "docs/section/second.md"' in pages_catalog
+    assert 'path: "docs/section/first.md"' in section_index
+    assert 'path: "docs/section/second.md"' in section_index
+    assert 'deleted:\n  []' in (root / "_catalog" / "sync.yaml").read_text(encoding="utf-8")
+
+
 def test_writer_uses_placeholder_path_for_followup_run(tmp_path: Path) -> None:
     intro_url = "https://example.com/docs/sd/nsdpro/Content/introduction/introduction.htm"
     change_url = "https://example.com/docs/sd/nsdpro/Content/Change_List/Change_List.htm"
@@ -668,6 +713,77 @@ def test_writer_uses_saved_structure_for_followup_run(tmp_path: Path) -> None:
     assert "[Stable](stable-26/_index.md)" in change_path.read_text(encoding="utf-8")
     assert 'path: "docs/sd/nsdpro/content/introduction/change_list/_index.md"' in pages_catalog
     assert not (root / "docs" / "sd" / "nsdpro" / "content" / "change_list" / "change_list.md").exists()
+
+
+def test_writer_does_not_replace_existing_doc_with_structure_placeholder(tmp_path: Path) -> None:
+    quick_url = "https://example.com/docs/sd/nsdpro/Content/QuickSolutions/Quick_solutions.htm"
+    quick_fetch_url = quick_url + "?tocpath=_____7"
+    other_url = "https://example.com/docs/sd/nsdpro/Content/Other/Other.htm"
+    other_fetch_url = other_url + "?tocpath=_____8"
+    config = MirrorConfig(source=quick_url, out_dir=tmp_path)
+
+    root = write_structure_catalog(
+        StructureRun(
+            entries=[
+                StructureEntry(
+                    canonical_url=quick_url,
+                    fetch_url=quick_fetch_url,
+                    title="Quick Solutions",
+                    depth=0,
+                    order=1,
+                    nav_path=("Quick Solutions",),
+                ),
+                StructureEntry(
+                    canonical_url=other_url,
+                    fetch_url=other_fetch_url,
+                    title="Other",
+                    depth=0,
+                    order=2,
+                    nav_path=("Other",),
+                ),
+            ]
+        ),
+        config,
+    )
+
+    write_mirror(
+        [
+            Page(
+                source_url=quick_fetch_url,
+                canonical_url=quick_url,
+                title="Quick Solutions",
+                markdown="Real quick solutions content.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=quick_url, out_dir=tmp_path),
+    )
+    quick_path = root / "docs" / "sd" / "nsdpro" / "content" / "quicksolutions" / "quick_solutions" / "_index.md"
+
+    assert 'page_type: "doc"' in quick_path.read_text(encoding="utf-8")
+    assert "Real quick solutions content." in quick_path.read_text(encoding="utf-8")
+
+    write_mirror(
+        [
+            Page(
+                source_url=other_fetch_url,
+                canonical_url=other_url,
+                title="Other",
+                markdown="Other content.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=other_url, out_dir=tmp_path),
+    )
+
+    quick_text = quick_path.read_text(encoding="utf-8")
+    pages_catalog = (root / "_catalog" / "pages.yaml").read_text(encoding="utf-8")
+
+    assert 'page_type: "doc"' in quick_text
+    assert "Real quick solutions content." in quick_text
+    assert "Раздел ожидает отдельного зеркалирования" not in quick_text
+    assert 'path: "docs/sd/nsdpro/content/quicksolutions/quick_solutions/_index.md"' in pages_catalog
+    assert 'placeholder: false' in pages_catalog
 
 
 def test_index_page_assets_stay_beside_index_file() -> None:

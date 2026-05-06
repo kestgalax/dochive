@@ -102,3 +102,4 @@ class MirrorConfig:
     image_size_mode: str = "intrinsic"
     image_max_width: int | None = None
     anti_bot_mode: str = "basic"
+    structure_mode: str = "auto"

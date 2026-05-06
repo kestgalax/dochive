@@ -102,6 +102,15 @@ def build_parser() -> argparse.ArgumentParser:
             "`stealth` and `aggressive` are reserved for future proxy/undetected-browser support."
         ),
     )
+    mirror.add_argument(
+        "--structure-mode",
+        choices=("auto", "toc", "links"),
+        default="auto",
+        help=(
+            "How to discover web documentation structure. `auto` uses a MadCap TOC when available, "
+            "`toc` requires it, and `links` uses link crawling."
+        ),
+    )
 
     structure = subparsers.add_parser("structure", help="Discover and save a web documentation structure.")
     structure.add_argument("--source", required=True, help="Start URL for structure discovery.")
@@ -135,6 +144,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Crawl4AI anti-bot profile for web sources. `basic` is the default; "
             "`stealth` and `aggressive` are reserved for future proxy/undetected-browser support."
+        ),
+    )
+    structure.add_argument(
+        "--structure-mode",
+        choices=("auto", "toc", "links"),
+        default="auto",
+        help=(
+            "How to discover web documentation structure. `auto` uses a MadCap TOC when available, "
+            "`toc` requires it, and `links` uses link crawling."
         ),
     )
 
@@ -189,6 +207,7 @@ def structure_command(args: argparse.Namespace) -> int:
         exclude_selector=args.exclude_selector,
         exclude_tags=tuple(args.exclude_tag) if args.exclude_tag else ("script", "style", "noscript"),
         anti_bot_mode=args.anti_bot,
+        structure_mode=args.structure_mode,
     )
 
     try:
@@ -228,6 +247,7 @@ def _mirror_config_from_args(args: argparse.Namespace) -> MirrorConfig:
         image_size_mode=args.image_size_mode,
         image_max_width=args.image_max_width,
         anti_bot_mode=args.anti_bot,
+        structure_mode=args.structure_mode,
     )
 
 

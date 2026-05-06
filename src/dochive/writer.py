@@ -43,7 +43,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     structure_items = _read_catalog_items(catalog_dir / "structure.yaml", "structure")
     previous_hashes = _catalog_hashes(previous_pages)
 
-    pages = _apply_structure_to_pages(pages, structure_items)
+    pages = _apply_structure_to_pages(pages, structure_items, previous_pages)
     child_urls_by_parent = _build_child_mapping(pages)
     path_by_url = _build_path_mapping(pages, config, child_urls_by_parent, previous_pages, structure_items)
     sync_roots = _sync_roots(path_by_url.values(), _relocated_previous_paths(previous_pages, pages, path_by_url))
@@ -417,11 +417,16 @@ def _structure_catalog_entry(entry: StructureEntry, relpath: PurePosixPath | Non
     }
 
 
-def _apply_structure_to_pages(pages: list[Page], structure_items: list[dict[str, object]]) -> list[Page]:
+def _apply_structure_to_pages(
+    pages: list[Page],
+    structure_items: list[dict[str, object]],
+    previous_pages: list[dict[str, object]] | None = None,
+) -> list[Page]:
     if not structure_items:
         return pages
 
     by_url = {page.canonical_url: page for page in pages}
+    mirrored_urls = _mirrored_catalog_urls(previous_pages or [])
     for item in structure_items:
         canonical_url = item.get("canonical_url")
         if not isinstance(canonical_url, str) or not canonical_url:
@@ -435,6 +440,9 @@ def _apply_structure_to_pages(pages: list[Page], structure_items: list[dict[str,
             if nav_path:
                 page.nav_path = nav_path
             page.nav_parent_url = nav_parent
+            continue
+
+        if canonical_url in mirrored_urls:
             continue
 
         title = str(item.get("title") or (nav_path[-1] if nav_path else canonical_url.rsplit("/", 1)[-1]))
@@ -452,6 +460,18 @@ def _apply_structure_to_pages(pages: list[Page], structure_items: list[dict[str,
         by_url[canonical_url] = placeholder
         pages.append(placeholder)
     return sorted(pages, key=lambda page: _structure_order(page, structure_items))
+
+
+def _mirrored_catalog_urls(previous_pages: list[dict[str, object]]) -> set[str]:
+    urls: set[str] = set()
+    for item in previous_pages:
+        canonical_url = item.get("canonical_url")
+        if not isinstance(canonical_url, str) or not canonical_url:
+            continue
+        if item.get("placeholder") is True:
+            continue
+        urls.add(canonical_url)
+    return urls
 
 
 def _structure_order(page: Page, structure_items: list[dict[str, object]]) -> tuple[int, str]:
@@ -749,7 +769,7 @@ def _sync_roots(paths: object, relocated_previous_paths: object = ()) -> tuple[P
     for path in [*list(paths), *list(relocated_previous_paths)]:
         if not isinstance(path, PurePosixPath):
             continue
-        roots.add(path.parent if str(path.parent) != "." else path)
+        roots.add(path)
     return tuple(sorted(roots, key=str))
 
 
@@ -899,6 +919,7 @@ def _write_folder_indexes_from_catalog(root: Path, pages: list[dict[str, object]
             current = current.parent
             all_folders.add(current)
 
+    folder_titles = _folder_titles_from_catalog(pages)
     for folder in sorted(all_folders, key=lambda item: str(item)):
         folder_path = root if str(folder) == "." else root / Path(*folder.parts)
         folder_path.mkdir(parents=True, exist_ok=True)
@@ -913,9 +934,15 @@ def _write_folder_indexes_from_catalog(root: Path, pages: list[dict[str, object]
         )
         payload = {
             "path": "" if str(folder) == "." else str(folder),
-            "title": _folder_title(folder),
+            "title": _catalog_folder_title(folder, folder_titles),
             "summary": "",
-            "children": [{"path": child, "title": _folder_title(PurePosixPath(child))} for child in child_dirs],
+            "children": [
+                {
+                    "path": child,
+                    "title": _catalog_folder_title(folder / child, folder_titles),
+                }
+                for child in child_dirs
+            ],
             "pages": [
                 {
                     "file": PurePosixPath(str(page["path"])).name,
@@ -931,6 +958,23 @@ def _write_folder_indexes_from_catalog(root: Path, pages: list[dict[str, object]
             "keywords": sorted({word for page in folder_pages for word in _keywords(str(page.get("title") or ""))}),
         }
         (folder_path / "_index.yaml").write_text(dumps_yaml(payload), encoding="utf-8")
+
+
+def _folder_titles_from_catalog(pages: list[dict[str, object]]) -> dict[PurePosixPath, str]:
+    titles: dict[PurePosixPath, str] = {}
+    for page in pages:
+        path = page.get("path")
+        title = page.get("title")
+        if not isinstance(path, str) or not isinstance(title, str) or not title:
+            continue
+        relpath = PurePosixPath(path)
+        if relpath.name == "_index.md":
+            titles[relpath.parent] = title
+    return titles
+
+
+def _catalog_folder_title(folder: PurePosixPath, titles: dict[PurePosixPath, str]) -> str:
+    return titles.get(folder) or _folder_title(folder)
 
 
 def _write_doc_root_files(root: Path, paths: object) -> None:
