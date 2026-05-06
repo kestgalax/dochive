@@ -9,8 +9,8 @@ from .models import MirrorConfig
 from .publish import publish_mirror
 from .search import search_files
 from .url_utils import is_url
-from .web_source import crawl_web
-from .writer import write_mirror
+from .web_source import build_web_structure, crawl_web
+from .writer import write_mirror, write_structure_catalog
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -18,6 +18,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "mirror":
         return mirror_command(args)
+    if args.command == "structure":
+        return structure_command(args)
     if args.command == "catalog":
         return catalog_command(args)
     if args.command == "query":
@@ -100,6 +102,59 @@ def build_parser() -> argparse.ArgumentParser:
             "`stealth` and `aggressive` are reserved for future proxy/undetected-browser support."
         ),
     )
+    mirror.add_argument(
+        "--structure-mode",
+        choices=("auto", "toc", "links"),
+        default="auto",
+        help=(
+            "How to discover web documentation structure. `auto` uses a MadCap TOC when available, "
+            "`toc` requires it, and `links` uses link crawling."
+        ),
+    )
+
+    structure = subparsers.add_parser("structure", help="Discover and save a web documentation structure.")
+    structure.add_argument("--source", required=True, help="Start URL for structure discovery.")
+    structure.add_argument("--out", required=True, type=Path, help="Output directory.")
+    structure.add_argument("--max-depth", type=int, default=3)
+    structure.add_argument("--max-pages", type=int, default=500)
+    structure.add_argument(
+        "--scope",
+        choices=("subtree", "domain"),
+        default="subtree",
+        help="Restrict discovery to the start URL directory subtree or the whole domain.",
+    )
+    structure.add_argument(
+        "--include-url-prefix",
+        action="append",
+        default=[],
+        help="Additional URL prefix allowed for discovery. Can be passed multiple times.",
+    )
+    structure.add_argument("--content-selector", help="CSS selector for the main content area when crawling web pages.")
+    structure.add_argument("--exclude-selector", help="CSS selector to exclude before navigation extraction.")
+    structure.add_argument(
+        "--exclude-tag",
+        action="append",
+        default=[],
+        help="HTML tag to exclude during web extraction. Can be passed multiple times.",
+    )
+    structure.add_argument(
+        "--anti-bot",
+        choices=("off", "basic", "stealth", "aggressive"),
+        default="basic",
+        help=(
+            "Crawl4AI anti-bot profile for web sources. `basic` is the default; "
+            "`stealth` and `aggressive` are reserved for future proxy/undetected-browser support."
+        ),
+    )
+    structure.add_argument(
+        "--structure-mode",
+        choices=("auto", "toc", "links"),
+        default="auto",
+        help=(
+            "How to discover web documentation structure. `auto` uses a MadCap TOC when available, "
+            "`toc` requires it, and `links` uses link crawling."
+        ),
+    )
 
     catalog = subparsers.add_parser("catalog", help="Show catalog file locations for a mirror.")
     catalog.add_argument("--root", required=True, type=Path, help="Mirror root directory.")
@@ -119,8 +174,59 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def mirror_command(args: argparse.Namespace) -> int:
-    save_asset_kinds = frozenset(kind.strip() for kind in args.save_assets.split(",") if kind.strip())
+    config = _mirror_config_from_args(args)
+
+    try:
+        run = crawl_web(config) if is_url(config.source) else crawl_local_html(config)
+        root = write_mirror(run.pages, config, issues=run.issues)
+    except Exception as exc:  # pragma: no cover - CLI boundary
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Mirrored {len(run.pages)} pages into {root}")
+    if run.issues:
+        print(f"Issues: {len(run.issues)}")
+    print(f"Catalog: {root / '_catalog' / 'pages.yaml'}")
+    print(f"Summary: {root / '_catalog' / 'summary.yaml'}")
+    print(f"Errors: {root / '_catalog' / 'errors.yaml'}")
+    return 0
+
+
+def structure_command(args: argparse.Namespace) -> int:
+    if not is_url(args.source):
+        print("error: `dochive structure` currently supports URL sources only.", file=sys.stderr)
+        return 2
     config = MirrorConfig(
+        source=args.source,
+        out_dir=args.out,
+        max_depth=args.max_depth,
+        max_pages=args.max_pages,
+        scope=args.scope,
+        include_url_prefixes=tuple(args.include_url_prefix),
+        content_selector=args.content_selector,
+        exclude_selector=args.exclude_selector,
+        exclude_tags=tuple(args.exclude_tag) if args.exclude_tag else ("script", "style", "noscript"),
+        anti_bot_mode=args.anti_bot,
+        structure_mode=args.structure_mode,
+    )
+
+    try:
+        run = build_web_structure(config)
+        root = write_structure_catalog(run, config)
+    except Exception as exc:  # pragma: no cover - CLI boundary
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Discovered {len(run.entries)} structure entries into {root}")
+    if run.issues:
+        print(f"Issues: {len(run.issues)}")
+    print(f"Structure: {root / '_catalog' / 'structure.yaml'}")
+    return 0
+
+
+def _mirror_config_from_args(args: argparse.Namespace) -> MirrorConfig:
+    save_asset_kinds = frozenset(kind.strip() for kind in args.save_assets.split(",") if kind.strip())
+    return MirrorConfig(
         source=args.source,
         out_dir=args.out,
         max_depth=args.max_depth,
@@ -141,27 +247,22 @@ def mirror_command(args: argparse.Namespace) -> int:
         image_size_mode=args.image_size_mode,
         image_max_width=args.image_max_width,
         anti_bot_mode=args.anti_bot,
+        structure_mode=args.structure_mode,
     )
-
-    try:
-        run = crawl_web(config) if is_url(config.source) else crawl_local_html(config)
-        root = write_mirror(run.pages, config, issues=run.issues)
-    except Exception as exc:  # pragma: no cover - CLI boundary
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-
-    print(f"Mirrored {len(run.pages)} pages into {root}")
-    if run.issues:
-        print(f"Issues: {len(run.issues)}")
-    print(f"Catalog: {root / '_catalog' / 'pages.yaml'}")
-    print(f"Summary: {root / '_catalog' / 'summary.yaml'}")
-    print(f"Errors: {root / '_catalog' / 'errors.yaml'}")
-    return 0
 
 
 def catalog_command(args: argparse.Namespace) -> int:
     root = args.root
-    for name in ("summary.yaml", "sync.yaml", "sync_history.yaml", "pages.yaml", "links.yaml", "assets.yaml", "errors.yaml"):
+    for name in (
+        "summary.yaml",
+        "sync.yaml",
+        "sync_history.yaml",
+        "structure.yaml",
+        "pages.yaml",
+        "links.yaml",
+        "assets.yaml",
+        "errors.yaml",
+    ):
         path = root / "_catalog" / name
         print(path)
     return 0

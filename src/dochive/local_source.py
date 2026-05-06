@@ -83,6 +83,7 @@ def crawl_local_html(config: MirrorConfig) -> MirrorRun:
                     )
 
         title = parser.title or path.stem.replace("-", " ").replace("_", " ").title()
+        anchor_headings = extract_html_anchor_headings(html)
         pages.append(
             Page(
                 source_url=page_url,
@@ -93,12 +94,13 @@ def crawl_local_html(config: MirrorConfig) -> MirrorRun:
                     parser.markdown,
                     clean=config.clean_markdown,
                     extra_noise_lines=config.noise_lines,
+                    anchor_headings=anchor_headings,
                 ),
                 depth=depth,
                 parent_url=parent_url,
                 links_internal=_unique(internal),
                 links_external=_unique(external),
-                anchor_headings=extract_html_anchor_headings(html),
+                anchor_headings=anchor_headings,
                 assets=parser.assets,
                 source_path=path,
             )

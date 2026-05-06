@@ -98,6 +98,93 @@ More content.
     assert normalize_markdown(markdown) == "Content.\n\nMore content.\n"
 
 
+def test_drops_leading_heading_anchor_buttons() -> None:
+    markdown = """
+[Q4 - 2026](#Q4_26)
+
+### Q4 - 2026
+Release notes.
+"""
+
+    assert (
+        normalize_markdown(markdown, anchor_headings={"Q4_26": "Q4 - 2026"})
+        == "### Q4 - 2026\nRelease notes.\n"
+    )
+
+
+def test_drops_leading_heading_anchor_toc_after_title() -> None:
+    markdown = """
+# Лицензии
+
+- [Пользовательские лицензии](#1)
+- [Лицензионный файл](#2)
+- [Учет сессий](#3)
+- [Контроль используемых лицензий](#4)
+
+## Пользовательские лицензии
+Основной текст.
+"""
+
+    assert normalize_markdown(
+        markdown,
+        anchor_headings={
+            "1": "Пользовательские лицензии",
+            "2": "Лицензионный файл",
+            "3": "Учет сессий",
+            "4": "Контроль используемых лицензий",
+        },
+    ) == "# Лицензии\n\n## Пользовательские лицензии\nОсновной текст.\n"
+
+
+def test_drops_leading_links_rewritten_to_heading_anchor_text() -> None:
+    markdown = """
+[Введение Naumen Service Desk Pro](../_index.md) > План развития продукта
+# План развития продукта
+### Q4 - 2026
+[Q4 - 2026](#Q3 - 2026) [Q3 - 2026](#Q2 - 2026) [Q2 - 2026](#Q1 - 2026)
+[Q1 - 2026](#Q4 - 2025) [Q4 - 2025](#Q3_25)
+[Q4 - 2023](#Q3 - 2023) [Q3 - 2023](#Q3_23)
+
+  * Обновленные модули.
+"""
+
+    assert normalize_markdown(
+        markdown,
+        anchor_headings={
+            "Q3_26": "Q3 - 2026",
+            "Q2_26": "Q2 - 2026",
+            "Q1_26": "Q1 - 2026",
+            "Q4_25": "Q4 - 2025",
+            "Q3_25": "Q3 - 2025",
+            "Q4_23": "Q4 - 2023",
+            "Q3_23_alt": "Q3 - 2023",
+        },
+    ) == (
+        "[Введение Naumen Service Desk Pro](../_index.md) > План развития продукта\n"
+        "# План развития продукта\n"
+        "### Q4 - 2026\n\n"
+        "  * Обновленные модули.\n"
+    )
+
+
+def test_keeps_body_heading_anchor_links() -> None:
+    markdown = """
+# Лицензии
+
+В этом разделе см. [Лицензионный файл](#2).
+
+## Лицензионный файл
+Основной текст.
+"""
+
+    assert normalize_markdown(markdown, anchor_headings={"2": "Лицензионный файл"}) == (
+        "# Лицензии\n\n"
+        "В этом разделе см. [Лицензионный файл](#2).\n\n"
+        "## Лицензионный файл\n"
+        "Основной текст.\n"
+    )
+
+
 def test_cleanup_rules_ignore_fenced_code() -> None:
     markdown = """
 ```html

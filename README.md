@@ -6,9 +6,20 @@ CLI tool for mirroring HTML documentation into a Markdown-first repository:
 - `_index.yaml` in every folder
 - global `_catalog/*.yaml` files
 - deterministic URL/file mapping
-- optional Crawl4AI web crawling
-- local HTML folder mirroring without browser dependencies
-- recovery for documentation headings written as styled HTML, such as `p class="H4"` or MadCap `h2 data-mc-autonum`
+
+## Key Features
+
+- Mirrors HTML documentation into a Gramax-ready Markdown repository.
+- Supports local HTML files, local HTML folders, and optional Crawl4AI web crawling with JavaScript rendering.
+- Preserves documentation hierarchy, page order, internal links, and `_index.md` pages for sections with children.
+- Discovers structure before content mirroring, so repeated and partial runs keep stable paths and placeholders.
+- Reads MadCap WebHelp navigation from `Data/HelpSystem.xml` when available instead of relying only on page links.
+- Downloads or copies images into page-local media folders; HTML video sources can also be localized with `--save-assets videos`.
+- Renders images as Gramax `<image .../>` tags with intrinsic sizes or capped width.
+- Recovers headings from styled HTML patterns such as `p class="H4"` and MadCap `h2 data-mc-autonum`.
+- Cleans common documentation noise, including repeated page chrome, selected tags, selectors, and exact noisy lines.
+- Writes catalogs and reports for pages, links, assets, structure, errors, and incremental sync.
+- Provides lexical search and Git publish helpers for mirrored repositories.
 
 ## Install
 
@@ -51,7 +62,13 @@ If `.venv` was created before switching Python installers, recreate it with Home
 Mirror local HTML:
 
 ```bash
-dochive mirror --source ./site-html --out ./mirror --max-depth 3 --save-assets images,files
+dochive mirror --source ./site-html --out ./mirror --max-depth 3 --save-assets images
+```
+
+Mirror a single local HTML file the same way:
+
+```bash
+dochive mirror --source ./site-html/index.html --out ./mirror --max-depth 1
 ```
 
 For web crawling, install the optional Crawl4AI extra and Playwright browsers:
@@ -59,7 +76,20 @@ For web crawling, install the optional Crawl4AI extra and Playwright browsers:
 ```bash
 python -m pip install -e ".[crawl4ai]"
 playwright install chromium
-dochive mirror --source https://docs.example.com --out ./mirror --render-js
+dochive structure --source https://docs.example.com --out ./mirror --max-depth 3 --structure-mode auto
+dochive mirror --source https://docs.example.com --out ./mirror --render-js --structure-mode auto --save-assets images
+```
+
+`dochive structure` saves `_catalog/structure.yaml` with the known navigation tree and final Gramax paths. Later `mirror` runs reuse that structure, keeping placeholders stable until each section is mirrored.
+
+For MadCap WebHelp sites, `--structure-mode auto` reads the official TOC from `Data/HelpSystem.xml` when available, so `--scope subtree` follows the user-visible navigation branch.
+
+Useful commands:
+
+```bash
+dochive catalog --root ./mirror/docs.example.com
+dochive query --root ./mirror/docs.example.com --text "quick start" --limit 5
+dochive publish --root ./mirror/docs.example.com --dry-run --init
 ```
 
 During development, editable installation keeps the `dochive` console command pointed at the current `src/` code. You can also run the package module directly from the repository root:

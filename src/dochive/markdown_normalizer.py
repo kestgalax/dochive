@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import unquote, urlparse
 
 from .text_utils import repair_mojibake
 
@@ -11,6 +12,8 @@ _RAW_HTML_EXAMPLE_RE = re.compile(
     re.IGNORECASE,
 )
 _NEXT_LINK_RE = re.compile(r"^\s*(?:\\?\*\\?\*)?\s*Далее\s*>>", re.IGNORECASE)
+_MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
+_MARKDOWN_LINK_TOKEN_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 
 DEFAULT_NOISE_LINES = {
@@ -25,7 +28,13 @@ DEFAULT_NOISE_LINES = {
 }
 
 
-def normalize_markdown(markdown: str, *, clean: bool = True, extra_noise_lines: tuple[str, ...] = ()) -> str:
+def normalize_markdown(
+    markdown: str,
+    *,
+    clean: bool = True,
+    extra_noise_lines: tuple[str, ...] = (),
+    anchor_headings: dict[str, str] | None = None,
+) -> str:
     text = repair_mojibake(markdown)
     text = _normalize_nbsp(text)
     text = _fence_raw_html_examples(text)
@@ -37,6 +46,7 @@ def normalize_markdown(markdown: str, *, clean: bool = True, extra_noise_lines: 
         text = _drop_noise_lines(text, DEFAULT_NOISE_LINES | set(extra_noise_lines))
         text = _trim_leading_page_chrome(text)
         text = _drop_embedded_navigation_chrome(text)
+        text = _drop_leading_heading_anchor_links(text, anchor_headings or {})
         text = _drop_footer_chrome(text)
         text = _collapse_repeated_lines(text)
         text = _normalize_blank_lines(text)
@@ -127,6 +137,70 @@ def _drop_next_page_links(text: str) -> str:
             continue
         output.append(line)
     return "\n".join(output)
+
+
+def _drop_leading_heading_anchor_links(text: str, anchor_headings: dict[str, str]) -> str:
+    if not anchor_headings:
+        return text
+
+    known_targets = {
+        _normalize_anchor_target(target)
+        for target in (*anchor_headings.keys(), *anchor_headings.values())
+        if _normalize_anchor_target(target)
+    }
+    lines = text.splitlines()
+    output: list[str] = []
+    index = 0
+    dropped = False
+    while index < len(lines):
+        line = lines[index]
+        if not line.strip() or _MARKDOWN_HEADING_RE.match(line.strip()) or _looks_like_breadcrumb(line):
+            output.append(line)
+            index += 1
+            continue
+        if _is_heading_anchor_link_line(line, known_targets):
+            dropped = True
+            index += 1
+            continue
+        break
+
+    if dropped and not any(line.strip() for line in lines[index:]):
+        return text
+    output.extend(lines[index:])
+    return "\n".join(output)
+
+
+def _is_heading_anchor_link_line(line: str, known_targets: set[str]) -> bool:
+    stripped = re.sub(r"^\s*(?:[-*]|\d+[.)])\s+", "", line.strip())
+    if not stripped:
+        return False
+
+    position = 0
+    found = False
+    while position < len(stripped):
+        while position < len(stripped) and stripped[position].isspace():
+            position += 1
+        match = _MARKDOWN_LINK_TOKEN_RE.match(stripped, position)
+        if not match:
+            return False
+        target = _normalize_anchor_target(_target_fragment(match.group(2)))
+        label = _normalize_anchor_target(match.group(1))
+        if target not in known_targets and label not in known_targets:
+            return False
+        found = True
+        position = match.end()
+    return found
+
+
+def _target_fragment(target: str) -> str:
+    target = target.strip()
+    if target.startswith("#"):
+        return unquote(target[1:]).strip()
+    return unquote(urlparse(target).fragment).strip()
+
+
+def _normalize_anchor_target(target: str) -> str:
+    return re.sub(r"\s+", " ", target).strip()
 
 
 def _normalize_media_spacing(text: str) -> str:

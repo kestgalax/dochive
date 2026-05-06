@@ -32,6 +32,7 @@ class Page:
     anchor_headings: dict[str, str] = field(default_factory=dict)
     assets: list[Asset] = field(default_factory=list)
     source_path: Path | None = None
+    placeholder: bool = False
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,25 @@ class MirrorRun:
     issues: list[MirrorIssue] = field(default_factory=list)
 
 
+@dataclass
+class StructureEntry:
+    canonical_url: str
+    fetch_url: str
+    title: str
+    depth: int
+    order: int
+    nav_parent_url: str | None = None
+    nav_path: tuple[str, ...] = ()
+    placeholder: bool = True
+    path: str | None = None
+
+
+@dataclass
+class StructureRun:
+    entries: list[StructureEntry] = field(default_factory=list)
+    issues: list[MirrorIssue] = field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class MirrorConfig:
     source: str
@@ -82,3 +102,4 @@ class MirrorConfig:
     image_size_mode: str = "intrinsic"
     image_max_width: int | None = None
     anti_bot_mode: str = "basic"
+    structure_mode: str = "auto"

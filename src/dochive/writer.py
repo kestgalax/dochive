@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -18,7 +19,8 @@ except ImportError:  # pragma: no cover - fallback for minimal embedded environm
 
 from .html_extract import is_local_file_reference
 from .image_size import read_image_size
-from .models import Asset, MirrorConfig, MirrorIssue, Page
+from .markdown_normalizer import _drop_leading_heading_anchor_links
+from .models import Asset, MirrorConfig, MirrorIssue, Page, StructureEntry, StructureRun
 from .url_utils import canonicalize_url, is_url, short_hash, source_root_name, url_to_markdown_relpath
 from .yaml_writer import dumps_yaml
 
@@ -38,11 +40,13 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     catalog_dir = root / "_catalog"
     catalog_dir.mkdir(exist_ok=True)
     previous_pages = _read_catalog_items(catalog_dir / "pages.yaml", "pages")
+    structure_items = _read_catalog_items(catalog_dir / "structure.yaml", "structure")
     previous_hashes = _catalog_hashes(previous_pages)
 
+    pages = _apply_structure_to_pages(pages, structure_items, previous_pages)
     child_urls_by_parent = _build_child_mapping(pages)
-    path_by_url = _build_path_mapping(pages, config, child_urls_by_parent)
-    sync_roots = _sync_roots(path_by_url.values())
+    path_by_url = _build_path_mapping(pages, config, child_urls_by_parent, previous_pages, structure_items)
+    sync_roots = _sync_roots(path_by_url.values(), _relocated_previous_paths(previous_pages, pages, path_by_url))
     scoped_previous_hashes = {
         path: content_hash
         for path, content_hash in previous_hashes.items()
@@ -107,7 +111,10 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
                     }
                 )
         for target in page.links_external:
-            written_links.append({"from": str(relpath), "to": target, "kind": "external"})
+            if target in path_by_url:
+                written_links.append({"from": str(relpath), "to": str(path_by_url[target]), "kind": "internal"})
+            else:
+                written_links.append({"from": str(relpath), "to": target, "kind": "external"})
         for asset in assets:
             written_assets.append(
                 {
@@ -165,6 +172,38 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     return root
 
 
+def write_structure_catalog(run: StructureRun, config: MirrorConfig) -> Path:
+    root = config.out_dir / source_root_name(config.source)
+    catalog_dir = root / "_catalog"
+    catalog_dir.mkdir(parents=True, exist_ok=True)
+    pages = [
+        Page(
+            source_url=entry.fetch_url,
+            canonical_url=entry.canonical_url,
+            title=entry.title,
+            markdown=_placeholder_markdown(entry.title, entry.fetch_url),
+            depth=entry.depth,
+            nav_parent_url=entry.nav_parent_url,
+            nav_path=entry.nav_path,
+            placeholder=entry.placeholder,
+        )
+        for entry in run.entries
+    ]
+    child_urls_by_parent = _build_child_mapping(pages)
+    path_by_url = _build_path_mapping(pages, config, child_urls_by_parent, previous_pages=[], structure_items=[])
+    entries = [
+        _structure_catalog_entry(entry, path_by_url.get(entry.canonical_url))
+        for entry in run.entries
+    ]
+    (catalog_dir / "structure.yaml").write_text(dumps_yaml({"structure": entries}), encoding="utf-8")
+    if run.issues:
+        (catalog_dir / "errors.yaml").write_text(
+            dumps_yaml({"errors": [issue.to_dict() for issue in run.issues]}),
+            encoding="utf-8",
+        )
+    return root
+
+
 def _read_previous_hashes(path: Path) -> dict[str, str]:
     return _catalog_hashes(_read_catalog_items(path, "pages"))
 
@@ -210,6 +249,10 @@ def _yaml_scalar_value(value: str) -> object:
         return []
     if re.fullmatch(r"-?\d+", value):
         return int(value)
+    if value == "true":
+        return True
+    if value == "false":
+        return False
     return _yaml_string_value(value)
 
 
@@ -304,7 +347,12 @@ def _page_frontmatter(
     children = [str(path_by_url[url]) for url in child_urls_by_parent.get(page.canonical_url, []) if url in path_by_url]
     nav_parent_url = nav_parent_by_url.get(page.canonical_url)
     parent = str(path_by_url[nav_parent_url]) if nav_parent_url in path_by_url else None
-    internal_links = [str(path_by_url[url]) for url in page.links_internal if url in path_by_url]
+    internal_links = [
+        str(path_by_url[url])
+        for url in [*page.links_internal, *page.links_external]
+        if url in path_by_url
+    ]
+    external_links = [url for url in page.links_external if url not in path_by_url]
     return {
         "source_url": page.source_url,
         "canonical_url": page.canonical_url,
@@ -317,7 +365,10 @@ def _page_frontmatter(
         "order": order_by_url.get(page.canonical_url, 0),
         "parent": parent,
         "children": children,
-        "page_type": "doc",
+        "page_type": "placeholder" if page.placeholder else "doc",
+        "placeholder": page.placeholder,
+        "nav_path": list(page.nav_path),
+        "nav_parent_url": page.nav_parent_url,
         "tags": [],
         "summary": "",
         "content_hash": content_hash,
@@ -329,7 +380,7 @@ def _page_frontmatter(
         },
         "links": {
             "internal": internal_links,
-            "external": page.links_external,
+            "external": external_links,
         },
     }
 
@@ -339,22 +390,120 @@ def _page_catalog_entry(page: Page, relpath: PurePosixPath, frontmatter: dict[st
         "path": str(relpath),
         "title": page.title,
         "source_url": page.source_url,
+        "canonical_url": page.canonical_url,
         "depth": page.depth,
         "order": frontmatter["order"],
         "summary": frontmatter["summary"],
         "tags": frontmatter["tags"],
+        "nav_path": json.dumps(list(page.nav_path), ensure_ascii=False),
+        "nav_parent_url": page.nav_parent_url,
+        "placeholder": page.placeholder,
         "content_hash": frontmatter["content_hash"],
     }
+
+
+def _structure_catalog_entry(entry: StructureEntry, relpath: PurePosixPath | None) -> dict[str, object]:
+    return {
+        "path": str(relpath) if relpath else entry.path,
+        "title": entry.title,
+        "source_url": entry.fetch_url,
+        "canonical_url": entry.canonical_url,
+        "fetch_url": entry.fetch_url,
+        "depth": entry.depth,
+        "order": entry.order,
+        "nav_path": json.dumps(list(entry.nav_path), ensure_ascii=False),
+        "nav_parent_url": entry.nav_parent_url,
+        "placeholder": entry.placeholder,
+    }
+
+
+def _apply_structure_to_pages(
+    pages: list[Page],
+    structure_items: list[dict[str, object]],
+    previous_pages: list[dict[str, object]] | None = None,
+) -> list[Page]:
+    if not structure_items:
+        return pages
+
+    by_url = {page.canonical_url: page for page in pages}
+    mirrored_urls = _mirrored_catalog_urls(previous_pages or [])
+    for item in structure_items:
+        canonical_url = item.get("canonical_url")
+        if not isinstance(canonical_url, str) or not canonical_url:
+            continue
+        nav_path = _catalog_nav_path(item)
+        nav_parent_url = item.get("nav_parent_url")
+        nav_parent = nav_parent_url if isinstance(nav_parent_url, str) and nav_parent_url else None
+        depth = int(item.get("depth") or 0)
+        if page := by_url.get(canonical_url):
+            page.depth = depth
+            if nav_path:
+                page.nav_path = nav_path
+            page.nav_parent_url = nav_parent
+            continue
+
+        if canonical_url in mirrored_urls:
+            continue
+
+        title = str(item.get("title") or (nav_path[-1] if nav_path else canonical_url.rsplit("/", 1)[-1]))
+        fetch_url = str(item.get("fetch_url") or item.get("source_url") or canonical_url)
+        placeholder = Page(
+            source_url=fetch_url,
+            canonical_url=canonical_url,
+            title=title,
+            markdown=_placeholder_markdown(title, fetch_url),
+            depth=depth,
+            nav_parent_url=nav_parent,
+            nav_path=nav_path,
+            placeholder=True,
+        )
+        by_url[canonical_url] = placeholder
+        pages.append(placeholder)
+    return sorted(pages, key=lambda page: _structure_order(page, structure_items))
+
+
+def _mirrored_catalog_urls(previous_pages: list[dict[str, object]]) -> set[str]:
+    urls: set[str] = set()
+    for item in previous_pages:
+        canonical_url = item.get("canonical_url")
+        if not isinstance(canonical_url, str) or not canonical_url:
+            continue
+        if item.get("placeholder") is True:
+            continue
+        urls.add(canonical_url)
+    return urls
+
+
+def _structure_order(page: Page, structure_items: list[dict[str, object]]) -> tuple[int, str]:
+    for item in structure_items:
+        if item.get("canonical_url") == page.canonical_url:
+            return int(item.get("order") or 0), page.canonical_url
+    return len(structure_items) + 1, page.canonical_url
+
+
+def _placeholder_markdown(title: str, source_url: str) -> str:
+    return (
+        f"# {title}\n\n"
+        "Раздел ожидает отдельного зеркалирования.\n\n"
+        f"Источник: {source_url}\n"
+    )
 
 
 def _build_path_mapping(
     pages: list[Page],
     config: MirrorConfig,
     child_urls_by_parent: dict[str, list[str]],
+    previous_pages: list[dict[str, object]] | None = None,
+    structure_items: list[dict[str, object]] | None = None,
 ) -> dict[str, PurePosixPath]:
     if is_url(config.source):
-        mapping = {page.canonical_url: url_to_markdown_relpath(page.canonical_url) for page in pages}
-        return _apply_gramax_layout(pages, mapping, child_urls_by_parent)
+        mapping = {
+            page.canonical_url: _structure_path_for_page(page, structure_items or [])
+            or _catalog_path_for_page(page, previous_pages or [])
+            or url_to_markdown_relpath(page.canonical_url)
+            for page in pages
+        }
+        return _resolve_path_collisions(pages, _apply_gramax_layout(pages, mapping, child_urls_by_parent))
 
     source_path = Path(config.source).resolve()
     root_dir = source_path.parent if source_path.is_file() else source_path
@@ -368,7 +517,98 @@ def _build_path_mapping(
         except ValueError:
             rel = Path(page.source_path.name)
         mapping[page.canonical_url] = _local_html_relpath(rel)
-    return _apply_gramax_layout(pages, mapping, child_urls_by_parent)
+    return _resolve_path_collisions(pages, _apply_gramax_layout(pages, mapping, child_urls_by_parent))
+
+
+def _structure_path_for_page(page: Page, structure_items: list[dict[str, object]]) -> PurePosixPath | None:
+    for item in structure_items:
+        if item.get("canonical_url") != page.canonical_url:
+            continue
+        path = item.get("path")
+        if isinstance(path, str) and path:
+            return PurePosixPath(path)
+    return None
+
+
+def _resolve_path_collisions(
+    pages: list[Page],
+    mapping: dict[str, PurePosixPath],
+) -> dict[str, PurePosixPath]:
+    resolved = dict(mapping)
+    used: dict[PurePosixPath, str] = {}
+    for page in pages:
+        path = resolved[page.canonical_url]
+        if path not in used:
+            used[path] = page.canonical_url
+            continue
+        path = _collision_safe_path(page, path)
+        while path in used:
+            path = _append_path_hash(path, page.canonical_url)
+        resolved[page.canonical_url] = path
+        used[path] = page.canonical_url
+    return resolved
+
+
+def _collision_safe_path(page: Page, path: PurePosixPath) -> PurePosixPath:
+    source_relpath = url_to_markdown_relpath(page.canonical_url)
+    source_parent = source_relpath.parent.name if str(source_relpath.parent) != "." else ""
+    if not source_parent:
+        return _append_path_hash(path, page.canonical_url)
+
+    if path.name == "_index.md":
+        folder = path.parent
+        slug = folder.name
+        parent = folder.parent
+        if source_parent.lower() != slug.lower():
+            return parent / f"{source_parent}-{slug}" / "_index.md"
+        return parent / f"{slug}-{short_hash(page.canonical_url)}" / "_index.md"
+
+    stem = path.stem
+    if source_parent.lower() != stem.lower():
+        return path.parent / f"{source_parent}-{path.name}"
+    return _append_path_hash(path, page.canonical_url)
+
+
+def _append_path_hash(path: PurePosixPath, value: str) -> PurePosixPath:
+    suffix = short_hash(value)
+    if path.name == "_index.md":
+        return path.parent.parent / f"{path.parent.name}-{suffix}" / "_index.md"
+    return path.with_name(f"{path.stem}-{suffix}{path.suffix}")
+
+
+def _catalog_path_for_page(page: Page, previous_pages: list[dict[str, object]]) -> PurePosixPath | None:
+    by_url: dict[str, PurePosixPath] = {}
+    by_nav_path: dict[tuple[str, ...], PurePosixPath] = {}
+    for item in previous_pages:
+        path = item.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        relpath = PurePosixPath(path)
+        canonical_url = item.get("canonical_url")
+        if isinstance(canonical_url, str) and canonical_url:
+            by_url[canonical_url] = relpath
+        nav_path = _catalog_nav_path(item)
+        if nav_path:
+            by_nav_path[nav_path] = relpath
+
+    if page.canonical_url in by_url:
+        return by_url[page.canonical_url]
+    if len(page.nav_path) > 1 and (parent_path := by_nav_path.get(page.nav_path[:-1])):
+        return _move_page_under_folder(url_to_markdown_relpath(page.canonical_url), parent_path.parent)
+    return None
+
+
+def _catalog_nav_path(item: dict[str, object]) -> tuple[str, ...]:
+    value = item.get("nav_path")
+    if not isinstance(value, str) or not value:
+        return ()
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(parsed, list):
+        return ()
+    return tuple(str(part) for part in parsed if str(part).strip())
 
 
 def _apply_gramax_layout(
@@ -380,11 +620,15 @@ def _apply_gramax_layout(
     parents_with_children = set(child_urls_by_parent)
     nav_url_by_path = _nav_url_by_path(pages)
 
+    for page in pages:
+        if page.placeholder and page.canonical_url in final_mapping:
+            final_mapping[page.canonical_url] = _page_index_path(final_mapping[page.canonical_url])
+
     for parent_url in parents_with_children:
         if parent_url in final_mapping:
             final_mapping[parent_url] = _page_index_path(final_mapping[parent_url])
 
-    for page in pages:
+    for page in sorted(pages, key=_layout_parent_first_key):
         nav_parent_url = _nav_parent_url(page, final_mapping.keys(), nav_url_by_path)
         if nav_parent_url not in parents_with_children or nav_parent_url not in final_mapping:
             continue
@@ -395,6 +639,11 @@ def _apply_gramax_layout(
         final_mapping[page.canonical_url] = _move_page_under_folder(current, parent_dir)
 
     return final_mapping
+
+
+def _layout_parent_first_key(page: Page) -> tuple[int, int, str]:
+    nav_depth = len(page.nav_path) if page.nav_path else page.depth
+    return nav_depth, page.depth, page.canonical_url
 
 
 def _page_index_path(path: PurePosixPath) -> PurePosixPath:
@@ -495,18 +744,32 @@ def _merge_catalog_items(
     return [*preserved, *current]
 
 
-def _sync_roots(paths: object) -> tuple[PurePosixPath, ...]:
+def _relocated_previous_paths(
+    previous_pages: list[dict[str, object]],
+    pages: list[Page],
+    path_by_url: dict[str, PurePosixPath],
+) -> list[PurePosixPath]:
+    current_urls = {page.canonical_url for page in pages}
+    paths: list[PurePosixPath] = []
+    for item in previous_pages:
+        canonical_url = item.get("canonical_url")
+        old_path = item.get("path")
+        if not isinstance(canonical_url, str) or canonical_url not in current_urls:
+            continue
+        if not isinstance(old_path, str) or not old_path:
+            continue
+        current_path = path_by_url.get(canonical_url)
+        if current_path and str(current_path) != old_path:
+            paths.append(PurePosixPath(old_path))
+    return paths
+
+
+def _sync_roots(paths: object, relocated_previous_paths: object = ()) -> tuple[PurePosixPath, ...]:
     roots: set[PurePosixPath] = set()
-    for path in paths:
+    for path in [*list(paths), *list(relocated_previous_paths)]:
         if not isinstance(path, PurePosixPath):
             continue
-        parts = path.parts
-        for index, part in enumerate(parts[:-1]):
-            if part.lower() == "content" and index + 1 < len(parts):
-                roots.add(PurePosixPath(*parts[: index + 2]))
-                break
-        else:
-            roots.add(PurePosixPath(parts[0]) if parts else PurePosixPath("."))
+        roots.add(path)
     return tuple(sorted(roots, key=str))
 
 
@@ -567,11 +830,14 @@ def _nav_parent_url(
     existing = set(existing_urls)
     if page.nav_parent_url == page.canonical_url:
         return None
-    if page.nav_parent_url in existing:
-        return page.nav_parent_url
+    if len(page.nav_path) == 1:
+        return None
     if len(page.nav_path) > 1:
         parent_url = nav_url_by_path.get(page.nav_path[:-1])
-        return parent_url if parent_url != page.canonical_url else None
+        if parent_url and parent_url != page.canonical_url:
+            return parent_url
+    if page.nav_parent_url in existing:
+        return page.nav_parent_url
     return None
 
 
@@ -653,6 +919,7 @@ def _write_folder_indexes_from_catalog(root: Path, pages: list[dict[str, object]
             current = current.parent
             all_folders.add(current)
 
+    folder_titles = _folder_titles_from_catalog(pages)
     for folder in sorted(all_folders, key=lambda item: str(item)):
         folder_path = root if str(folder) == "." else root / Path(*folder.parts)
         folder_path.mkdir(parents=True, exist_ok=True)
@@ -667,9 +934,15 @@ def _write_folder_indexes_from_catalog(root: Path, pages: list[dict[str, object]
         )
         payload = {
             "path": "" if str(folder) == "." else str(folder),
-            "title": _folder_title(folder),
+            "title": _catalog_folder_title(folder, folder_titles),
             "summary": "",
-            "children": [{"path": child, "title": _folder_title(PurePosixPath(child))} for child in child_dirs],
+            "children": [
+                {
+                    "path": child,
+                    "title": _catalog_folder_title(folder / child, folder_titles),
+                }
+                for child in child_dirs
+            ],
             "pages": [
                 {
                     "file": PurePosixPath(str(page["path"])).name,
@@ -685,6 +958,23 @@ def _write_folder_indexes_from_catalog(root: Path, pages: list[dict[str, object]
             "keywords": sorted({word for page in folder_pages for word in _keywords(str(page.get("title") or ""))}),
         }
         (folder_path / "_index.yaml").write_text(dumps_yaml(payload), encoding="utf-8")
+
+
+def _folder_titles_from_catalog(pages: list[dict[str, object]]) -> dict[PurePosixPath, str]:
+    titles: dict[PurePosixPath, str] = {}
+    for page in pages:
+        path = page.get("path")
+        title = page.get("title")
+        if not isinstance(path, str) or not isinstance(title, str) or not title:
+            continue
+        relpath = PurePosixPath(path)
+        if relpath.name == "_index.md":
+            titles[relpath.parent] = title
+    return titles
+
+
+def _catalog_folder_title(folder: PurePosixPath, titles: dict[PurePosixPath, str]) -> str:
+    return titles.get(folder) or _folder_title(folder)
 
 
 def _write_doc_root_files(root: Path, paths: object) -> None:
@@ -781,6 +1071,7 @@ def _rewrite_markdown_links(
         asset_by_source,
     )
     markdown = _normalize_media_spacing(markdown)
+    markdown = _drop_leading_heading_anchor_links(markdown, page.anchor_headings)
     return _render_details_sections(markdown)
 
 

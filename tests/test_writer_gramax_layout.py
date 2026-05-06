@@ -1,7 +1,13 @@
 from pathlib import Path, PurePosixPath
 
-from dochive.models import Asset, MirrorConfig, Page
-from dochive.writer import _asset_relpath, _normalize_media_spacing, _relative_asset_path, write_mirror
+from dochive.models import Asset, MirrorConfig, Page, StructureEntry, StructureRun
+from dochive.writer import (
+    _asset_relpath,
+    _normalize_media_spacing,
+    _relative_asset_path,
+    write_mirror,
+    write_structure_catalog,
+)
 
 
 def test_writer_uses_gramax_index_for_pages_with_children(tmp_path: Path) -> None:
@@ -137,6 +143,47 @@ def test_writer_does_not_nest_context_links_without_nav_parent(tmp_path: Path) -
     assert 'parent: null' in target_path.read_text(encoding="utf-8")
 
 
+def test_writer_resolves_duplicate_paths_with_source_section(tmp_path: Path) -> None:
+    root_url = "https://example.com/docs/root.htm"
+    parent_url = "https://example.com/docs/all_requests.htm"
+    im_url = "https://example.com/docs/im/functionality.htm"
+    req_url = "https://example.com/docs/req/functionality.htm"
+    pages = [
+        Page(
+            source_url=parent_url,
+            canonical_url=parent_url,
+            title="All Requests",
+            markdown=f"[IM]({im_url})\n\n[REQ]({req_url})\n",
+            depth=0,
+            links_internal=[im_url, req_url],
+        ),
+        Page(
+            source_url=im_url,
+            canonical_url=im_url,
+            title="Functionality",
+            markdown="IM.\n",
+            depth=1,
+            nav_parent_url=parent_url,
+        ),
+        Page(
+            source_url=req_url,
+            canonical_url=req_url,
+            title="Functionality",
+            markdown="REQ.\n",
+            depth=1,
+            nav_parent_url=parent_url,
+        ),
+    ]
+
+    root = write_mirror(pages, MirrorConfig(source=root_url, out_dir=tmp_path))
+
+    assert (root / "docs" / "all_requests" / "functionality.md").exists()
+    assert (root / "docs" / "all_requests" / "req-functionality.md").exists()
+    assert "[REQ](req-functionality.md)" in (root / "docs" / "all_requests" / "_index.md").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_writer_uses_nav_path_instead_of_discovery_parent(tmp_path: Path) -> None:
     root_url = "https://example.com/docs/root.htm"
     wrong_discovery_url = "https://example.com/docs/context.htm"
@@ -181,6 +228,123 @@ def test_writer_uses_nav_path_instead_of_discovery_parent(tmp_path: Path) -> Non
     assert context_path.exists()
     assert 'parent: "docs/parent/_index.md"' in child_path.read_text(encoding="utf-8")
     assert 'children:\n  - "docs/parent/child.md"' in parent_path.read_text(encoding="utf-8")
+
+
+def test_writer_prefers_nav_path_parent_over_conflicting_nav_parent_url(tmp_path: Path) -> None:
+    root_url = "https://example.com/docs/root.htm"
+    wrong_parent_url = "https://example.com/docs/main_page.htm"
+    parent_url = "https://example.com/docs/intro.htm"
+    child_url = "https://example.com/docs/change_list.htm"
+    pages = [
+        Page(
+            source_url=wrong_parent_url,
+            canonical_url=wrong_parent_url,
+            title="Main",
+            markdown=f"[Child]({child_url})\n",
+            depth=0,
+            links_internal=[child_url],
+        ),
+        Page(
+            source_url=parent_url,
+            canonical_url=parent_url,
+            title="Intro",
+            markdown="Intro.\n",
+            depth=1,
+            nav_path=("Intro",),
+        ),
+        Page(
+            source_url=child_url,
+            canonical_url=child_url,
+            title="Changes",
+            markdown="Changes.\n",
+            depth=1,
+            nav_parent_url=wrong_parent_url,
+            nav_path=("Intro", "Changes"),
+        ),
+    ]
+
+    root = write_mirror(pages, MirrorConfig(source=root_url, out_dir=tmp_path))
+
+    assert (root / "docs" / "intro" / "_index.md").exists()
+    assert (root / "docs" / "intro" / "change_list.md").exists()
+    assert not (root / "docs" / "main_page" / "change_list.md").exists()
+    assert 'parent: "docs/intro/_index.md"' in (root / "docs" / "intro" / "change_list.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_writer_keeps_single_segment_nav_path_at_top_level(tmp_path: Path) -> None:
+    source_url = "https://example.com/docs/root.htm"
+    intro_url = "https://example.com/docs/introduction/introduction.htm"
+    admin_url = "https://example.com/docs/admin_applied/admin_applied.htm"
+    pages = [
+        Page(
+            source_url=intro_url,
+            canonical_url=intro_url,
+            title="Intro",
+            markdown="Intro.\n",
+            depth=1,
+            nav_path=("Intro",),
+            placeholder=True,
+        ),
+        Page(
+            source_url=admin_url,
+            canonical_url=admin_url,
+            title="Admin",
+            markdown="Admin.\n",
+            depth=1,
+            nav_parent_url=intro_url,
+            nav_path=("Admin",),
+            placeholder=True,
+        ),
+    ]
+
+    root = write_mirror(pages, MirrorConfig(source=source_url, out_dir=tmp_path))
+
+    assert (root / "docs" / "introduction" / "_index.md").exists()
+    assert (root / "docs" / "admin_applied" / "_index.md").exists()
+    assert not (root / "docs" / "introduction" / "admin_applied" / "_index.md").exists()
+    assert 'parent: null' in (root / "docs" / "admin_applied" / "_index.md").read_text(encoding="utf-8")
+
+
+def test_writer_lays_out_parent_before_earlier_discovered_child(tmp_path: Path) -> None:
+    root_url = "https://example.com/docs/root.htm"
+    archive_url = "https://example.com/docs/change_list/archive.htm"
+    release_url = "https://example.com/docs/change_list/release_281.htm"
+    child_url = "https://example.com/docs/portal/zam.htm"
+    pages = [
+        Page(
+            source_url=child_url,
+            canonical_url=child_url,
+            title="Zam",
+            markdown="Zam.\n",
+            depth=1,
+            nav_parent_url="https://example.com/docs/work_portal.htm",
+            nav_path=("Intro", "Archive", "Release 2.8.1", "Zam"),
+        ),
+        Page(
+            source_url=archive_url,
+            canonical_url=archive_url,
+            title="Archive",
+            markdown="Archive.\n",
+            depth=1,
+            nav_path=("Intro", "Archive"),
+        ),
+        Page(
+            source_url=release_url,
+            canonical_url=release_url,
+            title="Release 2.8.1",
+            markdown="Release.\n",
+            depth=2,
+            nav_path=("Intro", "Archive", "Release 2.8.1"),
+        ),
+    ]
+
+    root = write_mirror(pages, MirrorConfig(source=root_url, out_dir=tmp_path))
+
+    assert (root / "docs" / "change_list" / "archive" / "release_281" / "_index.md").exists()
+    assert (root / "docs" / "change_list" / "archive" / "release_281" / "zam.md").exists()
+    assert not (root / "docs" / "change_list" / "release_281" / "zam.md").exists()
 
 
 def test_writer_ignores_self_nav_parent(tmp_path: Path) -> None:
@@ -353,6 +517,275 @@ def test_writer_preserves_other_mirrored_sections_between_runs(tmp_path: Path) -
     assert 'deleted:\n  []' in (root / "_catalog" / "sync.yaml").read_text(encoding="utf-8")
 
 
+def test_writer_preserves_same_folder_pages_between_single_page_runs(tmp_path: Path) -> None:
+    first_url = "https://example.com/docs/section/first.htm"
+    second_url = "https://example.com/docs/section/second.htm"
+
+    root = write_mirror(
+        [
+            Page(
+                source_url=first_url,
+                canonical_url=first_url,
+                title="First",
+                markdown="First content.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=first_url, out_dir=tmp_path),
+    )
+    first_path = root / "docs" / "section" / "first.md"
+
+    assert first_path.exists()
+
+    write_mirror(
+        [
+            Page(
+                source_url=second_url,
+                canonical_url=second_url,
+                title="Second",
+                markdown="Second content.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=second_url, out_dir=tmp_path),
+    )
+
+    pages_catalog = (root / "_catalog" / "pages.yaml").read_text(encoding="utf-8")
+    section_index = (root / "docs" / "section" / "_index.yaml").read_text(encoding="utf-8")
+
+    assert first_path.exists()
+    assert (root / "docs" / "section" / "second.md").exists()
+    assert 'path: "docs/section/first.md"' in pages_catalog
+    assert 'path: "docs/section/second.md"' in pages_catalog
+    assert 'path: "docs/section/first.md"' in section_index
+    assert 'path: "docs/section/second.md"' in section_index
+    assert 'deleted:\n  []' in (root / "_catalog" / "sync.yaml").read_text(encoding="utf-8")
+
+
+def test_writer_uses_placeholder_path_for_followup_run(tmp_path: Path) -> None:
+    intro_url = "https://example.com/docs/sd/nsdpro/Content/introduction/introduction.htm"
+    change_url = "https://example.com/docs/sd/nsdpro/Content/Change_List/Change_List.htm"
+    stable_url = "https://example.com/docs/sd/nsdpro/Content/Change_List/stable-26.htm"
+
+    root = write_mirror(
+        [
+            Page(
+                source_url=intro_url,
+                canonical_url=intro_url,
+                title="Introduction",
+                markdown=f"[Change List]({change_url})\n",
+                depth=0,
+                nav_path=("Introduction",),
+                links_external=[change_url],
+            ),
+            Page(
+                source_url=change_url,
+                canonical_url=change_url,
+                title="Change List",
+                markdown="# Change List\n\nРаздел ожидает отдельного зеркалирования.\n",
+                depth=1,
+                nav_parent_url=intro_url,
+                nav_path=("Introduction", "Change List"),
+                placeholder=True,
+            ),
+        ],
+        MirrorConfig(source=intro_url, out_dir=tmp_path),
+    )
+
+    placeholder_path = root / "docs" / "sd" / "nsdpro" / "content" / "introduction" / "change_list" / "_index.md"
+    intro_path = root / "docs" / "sd" / "nsdpro" / "content" / "introduction" / "_index.md"
+
+    assert placeholder_path.exists()
+    assert 'page_type: "placeholder"' in placeholder_path.read_text(encoding="utf-8")
+    assert "[Change List](change_list/_index.md)" in intro_path.read_text(encoding="utf-8")
+    assert 'canonical_url: "https://example.com/docs/sd/nsdpro/Content/Change_List/Change_List.htm"' in (
+        root / "_catalog" / "pages.yaml"
+    ).read_text(encoding="utf-8")
+    assert 'placeholder: true' in (root / "_catalog" / "pages.yaml").read_text(encoding="utf-8")
+
+    write_mirror(
+        [
+            Page(
+                source_url=change_url,
+                canonical_url=change_url,
+                title="Change List",
+                markdown=f"[Stable]({stable_url})\n",
+                depth=0,
+                nav_path=("Introduction", "Change List"),
+                links_internal=[stable_url],
+            ),
+            Page(
+                source_url=stable_url,
+                canonical_url=stable_url,
+                title="Stable",
+                markdown="Stable content.\n",
+                depth=1,
+                nav_parent_url=change_url,
+            ),
+        ],
+        MirrorConfig(source=change_url, out_dir=tmp_path),
+    )
+
+    updated_text = placeholder_path.read_text(encoding="utf-8")
+    stable_path = root / "docs" / "sd" / "nsdpro" / "content" / "introduction" / "change_list" / "stable-26.md"
+
+    assert stable_path.exists()
+    assert 'page_type: "doc"' in updated_text
+    assert "Раздел ожидает отдельного зеркалирования" not in updated_text
+    assert not (root / "docs" / "sd" / "nsdpro" / "content" / "change_list" / "change_list.md").exists()
+    assert 'parent: "docs/sd/nsdpro/content/introduction/change_list/_index.md"' in stable_path.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_writer_uses_saved_structure_for_followup_run(tmp_path: Path) -> None:
+    intro_url = "https://example.com/docs/sd/nsdpro/Content/introduction/introduction.htm"
+    change_url = "https://example.com/docs/sd/nsdpro/Content/Change_List/Change_List.htm"
+    stable_url = "https://example.com/docs/sd/nsdpro/Content/Change_List/stable-26.htm"
+    config = MirrorConfig(source=intro_url, out_dir=tmp_path)
+
+    root = write_structure_catalog(
+        StructureRun(
+            entries=[
+                StructureEntry(
+                    canonical_url=intro_url,
+                    fetch_url=intro_url,
+                    title="Introduction",
+                    depth=0,
+                    order=1,
+                    nav_path=("Introduction",),
+                ),
+                StructureEntry(
+                    canonical_url=change_url,
+                    fetch_url=change_url,
+                    title="Change List",
+                    depth=1,
+                    order=2,
+                    nav_parent_url=intro_url,
+                    nav_path=("Introduction", "Change List"),
+                ),
+                StructureEntry(
+                    canonical_url=stable_url,
+                    fetch_url=stable_url,
+                    title="Stable",
+                    depth=2,
+                    order=3,
+                    nav_parent_url=change_url,
+                    nav_path=("Introduction", "Change List", "Stable"),
+                ),
+            ]
+        ),
+        config,
+    )
+
+    structure_text = (root / "_catalog" / "structure.yaml").read_text(encoding="utf-8")
+
+    assert 'path: "docs/sd/nsdpro/content/introduction/_index.md"' in structure_text
+    assert 'path: "docs/sd/nsdpro/content/introduction/change_list/_index.md"' in structure_text
+    assert 'path: "docs/sd/nsdpro/content/introduction/change_list/stable-26/_index.md"' in structure_text
+
+    write_mirror(
+        [
+            Page(
+                source_url=change_url,
+                canonical_url=change_url,
+                title="Change List",
+                markdown=f"[Stable]({stable_url})\n",
+                depth=0,
+                links_internal=[stable_url],
+            )
+        ],
+        MirrorConfig(source=change_url, out_dir=tmp_path),
+    )
+
+    intro_path = root / "docs" / "sd" / "nsdpro" / "content" / "introduction" / "_index.md"
+    change_path = root / "docs" / "sd" / "nsdpro" / "content" / "introduction" / "change_list" / "_index.md"
+    stable_path = root / "docs" / "sd" / "nsdpro" / "content" / "introduction" / "change_list" / "stable-26" / "_index.md"
+    pages_catalog = (root / "_catalog" / "pages.yaml").read_text(encoding="utf-8")
+
+    assert intro_path.exists()
+    assert change_path.exists()
+    assert stable_path.exists()
+    assert 'page_type: "placeholder"' in intro_path.read_text(encoding="utf-8")
+    assert 'page_type: "doc"' in change_path.read_text(encoding="utf-8")
+    assert 'parent: "docs/sd/nsdpro/content/introduction/_index.md"' in change_path.read_text(encoding="utf-8")
+    assert 'page_type: "placeholder"' in stable_path.read_text(encoding="utf-8")
+    assert "[Stable](stable-26/_index.md)" in change_path.read_text(encoding="utf-8")
+    assert 'path: "docs/sd/nsdpro/content/introduction/change_list/_index.md"' in pages_catalog
+    assert not (root / "docs" / "sd" / "nsdpro" / "content" / "change_list" / "change_list.md").exists()
+
+
+def test_writer_does_not_replace_existing_doc_with_structure_placeholder(tmp_path: Path) -> None:
+    quick_url = "https://example.com/docs/sd/nsdpro/Content/QuickSolutions/Quick_solutions.htm"
+    quick_fetch_url = quick_url + "?tocpath=_____7"
+    other_url = "https://example.com/docs/sd/nsdpro/Content/Other/Other.htm"
+    other_fetch_url = other_url + "?tocpath=_____8"
+    config = MirrorConfig(source=quick_url, out_dir=tmp_path)
+
+    root = write_structure_catalog(
+        StructureRun(
+            entries=[
+                StructureEntry(
+                    canonical_url=quick_url,
+                    fetch_url=quick_fetch_url,
+                    title="Quick Solutions",
+                    depth=0,
+                    order=1,
+                    nav_path=("Quick Solutions",),
+                ),
+                StructureEntry(
+                    canonical_url=other_url,
+                    fetch_url=other_fetch_url,
+                    title="Other",
+                    depth=0,
+                    order=2,
+                    nav_path=("Other",),
+                ),
+            ]
+        ),
+        config,
+    )
+
+    write_mirror(
+        [
+            Page(
+                source_url=quick_fetch_url,
+                canonical_url=quick_url,
+                title="Quick Solutions",
+                markdown="Real quick solutions content.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=quick_url, out_dir=tmp_path),
+    )
+    quick_path = root / "docs" / "sd" / "nsdpro" / "content" / "quicksolutions" / "quick_solutions" / "_index.md"
+
+    assert 'page_type: "doc"' in quick_path.read_text(encoding="utf-8")
+    assert "Real quick solutions content." in quick_path.read_text(encoding="utf-8")
+
+    write_mirror(
+        [
+            Page(
+                source_url=other_fetch_url,
+                canonical_url=other_url,
+                title="Other",
+                markdown="Other content.\n",
+                depth=0,
+            )
+        ],
+        MirrorConfig(source=other_url, out_dir=tmp_path),
+    )
+
+    quick_text = quick_path.read_text(encoding="utf-8")
+    pages_catalog = (root / "_catalog" / "pages.yaml").read_text(encoding="utf-8")
+
+    assert 'page_type: "doc"' in quick_text
+    assert "Real quick solutions content." in quick_text
+    assert "Раздел ожидает отдельного зеркалирования" not in quick_text
+    assert 'path: "docs/sd/nsdpro/content/quicksolutions/quick_solutions/_index.md"' in pages_catalog
+    assert 'placeholder: false' in pages_catalog
+
+
 def test_index_page_assets_stay_beside_index_file() -> None:
     page_relpath = PurePosixPath("docs/beta_35/_index.md")
     asset = Asset(source="https://example.com/assets/example.png", kind="images")
@@ -395,6 +828,38 @@ def test_writer_rewrites_original_anchor_to_gramax_heading(tmp_path: Path) -> No
     assert "[3.5.6](#Release 3.5.6)" in text
     assert "[Absolute](#Release 3.5.6)" in text
     assert "beta_35.md#356" not in text
+
+
+def test_writer_drops_leading_heading_anchor_links_after_rewrite(tmp_path: Path) -> None:
+    page_url = "https://example.com/docs/plan.htm"
+    page = Page(
+        source_url=page_url,
+        canonical_url=page_url,
+        title="Plan",
+        markdown=(
+            "[Введение Naumen Service Desk Pro](../_index.md) > План развития продукта\n"
+            "# План развития продукта\n"
+            "### Q4 - 2026\n"
+            "[Q4 - 2026](#Q3_26) [Q3 - 2026](#Q2_26)\n"
+            "[Q2 - 2026](#Q1_26) [Q1 - 2026](#legacy_unknown)\n\n"
+            "  * Обновленные модули.\n"
+        ),
+        depth=0,
+        anchor_headings={
+            "Q3_26": "Q3 - 2026",
+            "Q2_26": "Q2 - 2026",
+            "Q1_26": "Q1 - 2026",
+            "Q1_26_alt": "Q1 - 2026",
+        },
+    )
+
+    root = write_mirror([page], MirrorConfig(source=page_url, out_dir=tmp_path))
+    text = (root / "docs" / "plan.md").read_text(encoding="utf-8")
+
+    assert "[Q4 - 2026]" not in text
+    assert "[Q3 - 2026]" not in text
+    assert "[Введение Naumen Service Desk Pro](../_index.md) > План развития продукта" in text
+    assert "### Q4 - 2026\n\n  * Обновленные модули." in text
 
 
 def test_writer_creates_gramax_doc_root_next_to_content_folder(tmp_path: Path) -> None:
