@@ -13,7 +13,10 @@ _RAW_HTML_EXAMPLE_RE = re.compile(
 )
 _NEXT_LINK_RE = re.compile(r"^\s*(?:\\?\*\\?\*)?\s*Далее\s*>>", re.IGNORECASE)
 _MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
+_MARKDOWN_HEADING_PARSE_RE = re.compile(r"^(\s{0,3}#{1,6}\s+)(.*\S)\s*$")
 _MARKDOWN_LINK_TOKEN_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_INLINE_PERMALINK_SYMBOL_RE = re.compile(r"^\s*(?:¶|#|🔗|🔖|link)\s+", re.IGNORECASE)
+_LEADING_MARKDOWN_LINK_RE = re.compile(r"^\s*\[([^\]]*)\]\((.*)\)\s+(.+)$")
 
 
 DEFAULT_NOISE_LINES = {
@@ -46,6 +49,7 @@ def normalize_markdown(
         text = _drop_noise_lines(text, DEFAULT_NOISE_LINES | set(extra_noise_lines))
         text = _trim_leading_page_chrome(text)
         text = _drop_embedded_navigation_chrome(text)
+        text = _normalize_heading_permalinks(text)
         text = _drop_leading_heading_anchor_links(text, anchor_headings or {})
         text = _drop_footer_chrome(text)
         text = _collapse_repeated_lines(text)
@@ -170,6 +174,68 @@ def _drop_leading_heading_anchor_links(text: str, anchor_headings: dict[str, str
     return "\n".join(output)
 
 
+def _normalize_heading_permalinks(text: str) -> str:
+    output: list[str] = []
+    previous_heading_key = ""
+    for line in text.splitlines():
+        normalized = _normalize_heading_permalink(line)
+        heading_key = _heading_dedupe_key(normalized)
+        if heading_key and heading_key == previous_heading_key:
+            continue
+        output.append(normalized)
+        if heading_key:
+            previous_heading_key = heading_key
+        elif normalized.strip():
+            previous_heading_key = ""
+    return "\n".join(output)
+
+
+def _normalize_heading_permalink(line: str) -> str:
+    match = _MARKDOWN_HEADING_PARSE_RE.match(line)
+    if not match:
+        return line
+    prefix, heading = match.groups()
+    prefix = prefix.strip() + " "
+    cleaned = heading.strip()
+    while True:
+        candidate = _drop_leading_permalink(cleaned)
+        if candidate == cleaned:
+            break
+        cleaned = candidate
+    cleaned = _unwrap_heading_emphasis(cleaned)
+    return prefix + cleaned
+
+
+def _drop_leading_permalink(text: str) -> str:
+    match = _LEADING_MARKDOWN_LINK_RE.match(text)
+    if match:
+        label, target, rest = match.groups()
+        if _is_permalink_label(label) and "#" in target:
+            return rest.strip()
+    return _INLINE_PERMALINK_SYMBOL_RE.sub("", text, count=1).strip()
+
+
+def _is_permalink_label(label: str) -> bool:
+    normalized = re.sub(r"\s+", " ", label).strip().casefold()
+    return normalized in {"", "¶", "#", "link", "🔗", "🔖"}
+
+
+def _unwrap_heading_emphasis(text: str) -> str:
+    stripped = text.strip()
+    for marker in ("**", "__"):
+        if stripped.startswith(marker) and stripped.endswith(marker) and len(stripped) > len(marker) * 2:
+            return stripped[len(marker) : -len(marker)].strip()
+    return stripped
+
+
+def _heading_dedupe_key(line: str) -> str:
+    match = _MARKDOWN_HEADING_PARSE_RE.match(line)
+    if not match:
+        return ""
+    text = re.sub(r"\s+", " ", match.group(2)).strip().casefold()
+    return f"{len(match.group(1).strip())}:{text}"
+
+
 def _is_heading_anchor_link_line(line: str, known_targets: set[str]) -> bool:
     stripped = re.sub(r"^\s*(?:[-*]|\d+[.)])\s+", "", line.strip())
     if not stripped:
@@ -281,13 +347,16 @@ def _collapse_repeated_lines(text: str) -> str:
 def _trim_leading_page_chrome(text: str) -> str:
     lines = text.splitlines()
     heading_index = _first_h1_index(lines)
+    if heading_index is None:
+        heading_index = _first_heading_index(lines)
     if heading_index is None or heading_index == 0:
         return text
 
     keep_from = heading_index
     previous_index = _previous_nonblank_index(lines, heading_index)
-    if previous_index is not None and _looks_like_breadcrumb(lines[previous_index]):
-        keep_from = previous_index
+    if previous_index is not None:
+        if _looks_like_breadcrumb(lines[previous_index]) or _looks_like_plain_article_title(lines[previous_index]):
+            keep_from = previous_index
 
     if _looks_like_navigation_chrome(lines[:keep_from]):
         return "\n".join(lines[keep_from:])
@@ -334,6 +403,13 @@ def _first_h1_index(lines: list[str]) -> int | None:
     return None
 
 
+def _first_heading_index(lines: list[str]) -> int | None:
+    for index, line in enumerate(lines):
+        if _MARKDOWN_HEADING_RE.match(line.strip()):
+            return index
+    return None
+
+
 def _previous_nonblank_index(lines: list[str], before: int) -> int | None:
     for index in range(before - 1, -1, -1):
         if lines[index].strip():
@@ -344,6 +420,28 @@ def _previous_nonblank_index(lines: list[str], before: int) -> int | None:
 def _looks_like_breadcrumb(line: str) -> bool:
     normalized = _line_text(line)
     return " > " in normalized and ("[" in normalized or "](" in normalized)
+
+
+def _looks_like_plain_article_title(line: str) -> bool:
+    normalized = _line_text(line)
+    if not normalized or "](" in normalized or normalized.startswith(("* ", "- ")):
+        return False
+    if len(normalized) > 140:
+        return False
+    lowered = normalized.casefold()
+    chrome_words = {
+        "поиск",
+        "search",
+        "продажи",
+        "sales",
+        "прочее",
+        "other",
+        "регламенты и методики",
+        "технические вопросы",
+        "поддержка клиентов",
+        "функциональные возможности",
+    }
+    return lowered not in chrome_words
 
 
 def _looks_like_navigation_chrome(lines: list[str]) -> bool:
@@ -358,7 +456,9 @@ def _looks_like_navigation_chrome(lines: list[str]) -> bool:
 
 def _drop_footer_chrome(text: str) -> str:
     lines = text.splitlines()
-    for index, line in enumerate(lines):
+    tail_start = max(0, len(lines) - 12)
+    for index in range(tail_start, len(lines)):
+        line = lines[index]
         normalized = _line_text(line)
         if _looks_like_footer_notice(normalized):
             start = _footer_start_index(lines, index)
@@ -376,18 +476,24 @@ def _footer_start_index(lines: list[str], index: int) -> int:
 
 def _looks_like_footer_notice(line: str) -> bool:
     lowered = line.lower()
+    powered_by = "powered by" in lowered or "работает на" in lowered
+    if powered_by and ("](" in line or "|" in line or lowered.strip().startswith(("powered by", "работает на"))):
+        return True
     return any(
         marker in lowered
         for marker in (
             "legal notice",
             "public offer",
             "terms of use",
+            "all rights reserved",
+            "copyright",
             "ctrl+enter",
             "обращаем ваше внимание",
             "публичной оферт",
+            "все права защищены",
             "сообщить об ошибке",
         )
-    )
+    ) or bool(re.search(r"(?:©|&copy;|\bcopyright\b|\b20\d{2}\b).{0,80}(?:rights reserved|powered by|права защищены)", lowered))
 
 
 def _looks_like_footer_heading_or_link(line: str) -> bool:
@@ -401,10 +507,15 @@ def _looks_like_footer_heading_or_link(line: str) -> bool:
             "feedback",
             "legal",
             "terms",
+            "privacy",
+            "cookies",
+            "powered by",
             "страница продукта",
             "главная документации",
             "техническая поддержка",
             "обратная связь",
+            "конфиденциальность",
+            "правовая информация",
         )
     )
 

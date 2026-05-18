@@ -9,6 +9,8 @@ CLI-инструмент для зеркалирования HTML-докумен
 - глобальные файлы `_catalog/*.yaml`
 - детерминированное сопоставление URL и файлов
 
+Dochive — инструмент общего назначения, но у него есть полноценная поддержка документации в стиле MadCap WebHelp и Wiki.js.
+
 ## Основные возможности
 
 - Зеркалирует HTML-документацию в Markdown-репозиторий, готовый для Gramax.
@@ -16,6 +18,7 @@ CLI-инструмент для зеркалирования HTML-докумен
 - Сохраняет иерархию документации, порядок страниц, внутренние ссылки и `_index.md` страницы для разделов с дочерними страницами.
 - Обнаруживает структуру перед зеркалированием контента, поэтому повторные и частичные запуски сохраняют стабильные пути и placeholders.
 - Читает навигацию MadCap WebHelp из `Data/HelpSystem.xml`, когда она доступна, вместо опоры только на ссылки страниц.
+- Обрабатывает Wiki.js-style extensionless URLs, language prefixes, service links, permalink heading anchors и повторяющийся site chrome.
 - Скачивает или копирует изображения в page-local media folders; HTML video sources также можно локализовать через `--save-assets videos`.
 - Рендерит изображения как Gramax `<image .../>` tags с intrinsic sizes или ограниченной шириной.
 - Восстанавливает заголовки из HTML-паттернов стилей, например `p class="H4"` и MadCap `h2 data-mc-autonum`.
@@ -85,6 +88,8 @@ dochive mirror --source https://docs.example.com --out ./mirror --render-js --st
 `dochive structure` сохраняет `_catalog/structure.yaml` с известным navigation tree и итоговыми Gramax paths. Последующие запуски `mirror` переиспользуют эту структуру, сохраняя placeholders стабильными, пока каждый раздел не будет зеркалирован.
 
 Для сайтов MadCap WebHelp `--structure-mode auto` читает официальный TOC из `Data/HelpSystem.xml`, когда он доступен, поэтому `--scope subtree` следует по пользовательской ветке навигации.
+
+Для сайтов Wiki.js `--structure-mode auto` откатывается к link-based discovery, сохраняет extensionless pages в Gramax layout с `_index.md`, фильтрует типичные service links вроде login/tag routes, нормализует ссылки с language prefix и удаляет характерный Wiki.js chrome из mirrored Markdown.
 
 Полезные команды:
 

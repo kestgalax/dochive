@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from html import unescape
+from html import escape, unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -192,6 +192,116 @@ def inject_html_videos(markdown: str, html: str, base_url: str) -> str:
     return "\n".join(output)
 
 
+def inject_html_tables(markdown: str, html: str, base_url: str) -> str:
+    """Replace lossy Markdown table output with cleaned HTML tables from the source page."""
+
+    tables = extract_html_tables(html, base_url)
+    if not tables:
+        return markdown
+
+    lines = markdown.splitlines()
+    output: list[str] = []
+    index = 0
+    table_index = 0
+    while index < len(lines):
+        if table_index < len(tables) and _looks_like_markdown_table_start(lines, index):
+            end = _markdown_table_block_end(lines, index)
+            if end > index:
+                if output and output[-1].strip():
+                    output.append("")
+                output.append(tables[table_index])
+                next_line = lines[end] if end < len(lines) else ""
+                if next_line.strip():
+                    output.append("")
+                index = end
+                table_index += 1
+                continue
+        output.append(lines[index])
+        index += 1
+
+    if table_index == 0:
+        return markdown
+    return "\n".join(output).strip() + "\n"
+
+
+def extract_html_tables(html: str, base_url: str) -> list[str]:
+    tables: list[str] = []
+    for match in re.finditer(r"<table\b.*?</table>", html, re.IGNORECASE | re.DOTALL):
+        table = _sanitize_html_table(match.group(0), base_url)
+        if table:
+            tables.append(table)
+    return tables
+
+
+def _sanitize_html_table(html: str, base_url: str) -> str:
+    parser = _HtmlTableSanitizer(base_url)
+    parser.feed(html)
+    parser.close()
+    rendered = "".join(parser.output).strip()
+    if rendered.lower().startswith("<table") and rendered.lower().endswith("</table>"):
+        return rendered.replace("<table>", '<table header="row">', 1)
+    return ""
+
+
+def _looks_like_markdown_table_start(lines: list[str], index: int) -> bool:
+    stripped = lines[index].strip()
+    if not stripped.startswith("|"):
+        return False
+    window = lines[index : min(len(lines), index + 8)]
+    return any(re.match(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$", line) for line in window)
+
+
+def _markdown_table_block_end(lines: list[str], start: int) -> int:
+    index = start
+    seen_separator = False
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if index > start and _is_markdown_table_boundary(stripped):
+            break
+        if re.match(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$", lines[index]):
+            seen_separator = True
+        if (
+            index > start
+            and seen_separator
+            and stripped
+            and not _is_markdown_table_continuation(lines[index])
+            and _is_after_regular_markdown_table(lines, index)
+        ):
+            break
+        index += 1
+    return index
+
+
+def _is_after_regular_markdown_table(lines: list[str], index: int) -> bool:
+    previous = lines[index - 1].strip() if index else ""
+    if not previous.startswith("|"):
+        return False
+    next_line = lines[index + 1].strip() if index + 1 < len(lines) else ""
+    return not next_line.startswith(("|", "-", "*", "+"))
+
+
+def _is_markdown_table_boundary(stripped: str) -> bool:
+    if not stripped:
+        return False
+    return bool(
+        _MARKDOWN_HEADING_RE.match(stripped)
+        or stripped.startswith(("---", "***", "<image ", "<video ", "!["))
+        or stripped in {"</table>", "<table>"}
+    )
+
+
+def _is_markdown_table_continuation(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return True
+    return (
+        stripped.startswith("|")
+        or line.startswith((" ", "\t"))
+        or stripped.startswith(("- ", "* ", "+ "))
+        or bool(re.match(r"^\d+\.\s+", stripped))
+    )
+
+
 def extract_html_videos(html: str, base_url: str) -> list[list[str]]:
     parser = _HtmlVideoParser(base_url)
     parser.feed(html)
@@ -239,6 +349,98 @@ class _HtmlVideoParser(HTMLParser):
         if not self._depth and self._sources:
             self.videos.append(list(dict.fromkeys(self._sources)))
             self._sources = []
+
+
+class _HtmlTableSanitizer(HTMLParser):
+    _INLINE_TAGS = {"strong", "b", "em", "i", "code"}
+    _BLOCK_TAGS = {"table", "thead", "tbody", "tfoot", "tr", "th", "td", "ul", "ol", "li", "p"}
+    _PRESERVE_ATTRS = {"rowspan", "colspan"}
+
+    def __init__(self, base_url: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.output: list[str] = []
+        self._skip_depth = 0
+        self._in_td = False
+        self._td_content_started = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag in {"script", "style", "noscript", "svg"}:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        attrs_map = {key.lower(): value or "" for key, value in attrs}
+        if tag == "a":
+            href = attrs_map.get("href", "").strip()
+            if href:
+                self.output.append(f'<a href="{escape(urljoin(self.base_url, href), quote=True)}">')
+            return
+        if tag == "br":
+            if self._in_td:
+                self.output.append("<br/>")
+            return
+        if tag in self._INLINE_TAGS:
+            self.output.append(f"<{tag}>")
+            return
+        if tag in self._BLOCK_TAGS:
+            if tag == "td":
+                self._in_td = True
+                self._td_content_started = False
+                attrs_str = self._render_attrs(attrs_map)
+                self.output.append(f"<td{attrs_str}>")
+                return
+            if self._in_td:
+                self.output.append(f"<{tag}>")
+                return
+            self._append_newline()
+            self.output.append(f"<{tag}{self._render_attrs(attrs_map)}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in {"script", "style", "noscript", "svg"} and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if self._skip_depth:
+            return
+        if tag == "a":
+            self.output.append("</a>")
+        elif tag == "br":
+            pass
+        elif tag in self._INLINE_TAGS:
+            self.output.append(f"</{tag}>")
+        elif tag in self._BLOCK_TAGS:
+            if tag == "td":
+                self._in_td = False
+                self.output.append("</td>")
+            elif self._in_td:
+                self.output.append(f"</{tag}>")
+            else:
+                self.output.append(f"</{tag}>")
+                self._append_newline()
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        if self._in_td:
+            self.output.append(data)
+        else:
+            text = re.sub(r"\s+", " ", data.replace("\xa0", " ")).strip()
+            if text:
+                self.output.append(escape(text))
+
+    def _render_attrs(self, attrs_map: dict[str, str]) -> str:
+        output: list[str] = []
+        for name in sorted(self._PRESERVE_ATTRS):
+            value = attrs_map.get(name, "").strip()
+            if value and value.isdigit():
+                output.append(f'{name}="{escape(value, quote=True)}"')
+        return (" " + " ".join(output)) if output else ""
+
+    def _append_newline(self) -> None:
+        if self.output and not self.output[-1].endswith("\n"):
+            self.output.append("\n")
 
 
 def extract_html_headings(html: str) -> list[HtmlHeading]:

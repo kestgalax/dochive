@@ -74,6 +74,40 @@ def test_writer_uses_gramax_index_for_pages_with_children(tmp_path: Path) -> Non
     assert 'to: "docs/beta_35/kakaya-to-stranica.md"' in links_catalog
 
 
+def test_writer_keeps_url_root_at_doc_root(tmp_path: Path) -> None:
+    root_url = "https://example.com/"
+    child_url = "https://example.com/ru/advices"
+
+    root = write_structure_catalog(
+        StructureRun(
+            entries=[
+                StructureEntry(
+                    canonical_url=root_url,
+                    fetch_url=root_url,
+                    title="Home",
+                    depth=0,
+                    order=1,
+                ),
+                StructureEntry(
+                    canonical_url=child_url,
+                    fetch_url=child_url,
+                    title="Advices",
+                    depth=1,
+                    order=2,
+                    nav_parent_url=root_url,
+                ),
+            ]
+        ),
+        MirrorConfig(source=root_url, out_dir=tmp_path),
+    )
+
+    structure_text = (root / "_catalog" / "structure.yaml").read_text(encoding="utf-8")
+
+    assert 'path: "_index.md"' in structure_text
+    assert 'path: "ru/advices/_index.md"' in structure_text
+    assert 'path: "index/ru/advices/_index.md"' not in structure_text
+
+
 def test_writer_collapses_duplicate_section_filename_for_index_page(tmp_path: Path) -> None:
     parent_url = "https://example.com/docs/QuickStart/QuickStart.htm"
     child_url = "https://example.com/docs/QuickStart/1.htm"
@@ -715,6 +749,152 @@ def test_writer_uses_saved_structure_for_followup_run(tmp_path: Path) -> None:
     assert not (root / "docs" / "product_docs" / "content" / "change_list" / "change_list.md").exists()
 
 
+def test_writer_ignores_structure_paths_without_navigation_context(tmp_path: Path) -> None:
+    source_url = "https://example.com/ru/advices"
+    child_url = "https://example.com/ru/advices/work-on-tasks"
+    config = MirrorConfig(source=source_url, out_dir=tmp_path)
+
+    root = write_structure_catalog(
+        StructureRun(
+            entries=[
+                StructureEntry(
+                    canonical_url=source_url,
+                    fetch_url=source_url,
+                    title="Advices",
+                    depth=0,
+                    order=1,
+                    path="t/index/index/advices-index/_index.md",
+                ),
+                StructureEntry(
+                    canonical_url=child_url,
+                    fetch_url=child_url,
+                    title="Work On Tasks",
+                    depth=1,
+                    order=2,
+                    nav_parent_url=source_url,
+                    path="t/index/index/work-on-tasks-index/_index.md",
+                ),
+            ]
+        ),
+        config,
+    )
+
+    write_mirror(
+        [
+            Page(
+                source_url=source_url,
+                canonical_url=source_url,
+                title="Advices",
+                markdown=f"[Work]({child_url})\n",
+                depth=0,
+                links_internal=[child_url],
+            ),
+            Page(
+                source_url=child_url,
+                canonical_url=child_url,
+                title="Work On Tasks",
+                markdown="Work content.\n",
+                depth=1,
+                nav_parent_url=source_url,
+            ),
+        ],
+        config,
+    )
+
+    assert (root / "ru" / "advices" / "_index.md").exists()
+    assert (root / "ru" / "advices" / "work-on-tasks" / "_index.md").exists()
+    assert not (root / "t" / "index" / "index" / "advices-index" / "_index.md").exists()
+
+
+def test_writer_ignores_incompatible_previous_catalog_path(tmp_path: Path) -> None:
+    source_url = "https://example.com/ru/advices"
+    child_url = "https://example.com/ru/advices/work-on-tasks"
+    root = tmp_path / "example.com"
+    catalog = root / "_catalog"
+    catalog.mkdir(parents=True)
+    (catalog / "pages.yaml").write_text(
+        f'''pages:
+  -
+    path: "t/index/advices/_index.md"
+    title: "Advices"
+    source_url: "{source_url}"
+    canonical_url: "{source_url}"
+    nav_path: "[]"
+    placeholder: false
+  -
+    path: "t/index/advices/work-on-tasks/_index.md"
+    title: "Work"
+    source_url: "{child_url}"
+    canonical_url: "{child_url}"
+    nav_path: "[]"
+    placeholder: false
+''',
+        encoding="utf-8",
+    )
+
+    write_mirror(
+        [
+            Page(
+                source_url=source_url,
+                canonical_url=source_url,
+                title="Advices",
+                markdown=f"[Work]({child_url})\n",
+                depth=0,
+                links_internal=[child_url],
+            ),
+            Page(
+                source_url=child_url,
+                canonical_url=child_url,
+                title="Work",
+                markdown="Work content.\n",
+                depth=1,
+                nav_parent_url=source_url,
+            ),
+        ],
+        MirrorConfig(source=source_url, out_dir=tmp_path),
+    )
+
+    pages_catalog = (catalog / "pages.yaml").read_text(encoding="utf-8")
+
+    assert (root / "ru" / "advices" / "_index.md").exists()
+    assert (root / "ru" / "advices" / "work-on-tasks" / "_index.md").exists()
+    assert 'path: "ru/advices/_index.md"' in pages_catalog
+    assert 'path: "ru/advices/work-on-tasks/_index.md"' in pages_catalog
+    assert 'path: "t/index/advices/_index.md"' not in pages_catalog
+
+
+def test_writer_rewrites_missing_language_prefix_links(tmp_path: Path) -> None:
+    source_url = "https://example.com/ru/advices"
+    child_url = "https://example.com/ru/advices/work-on-tasks"
+
+    root = write_mirror(
+        [
+            Page(
+                source_url=source_url,
+                canonical_url=source_url,
+                title="Advices",
+                markdown="[Work](https://example.com/advices/work-on-tasks)\n",
+                depth=0,
+                links_internal=[child_url],
+            ),
+            Page(
+                source_url="https://example.com/advices/work-on-tasks",
+                canonical_url=child_url,
+                title="Work",
+                markdown="Work content.\n",
+                depth=1,
+                nav_parent_url=source_url,
+            ),
+        ],
+        MirrorConfig(source=source_url, out_dir=tmp_path),
+    )
+
+    text = (root / "ru" / "advices" / "_index.md").read_text(encoding="utf-8")
+
+    assert "[Work](work-on-tasks/_index.md)" in text
+    assert "https://example.com/advices/work-on-tasks" not in text
+
+
 def test_writer_does_not_replace_existing_doc_with_structure_placeholder(tmp_path: Path) -> None:
     quick_url = "https://example.com/docs/product_docs/Content/QuickSolutions/Quick_solutions.htm"
     quick_fetch_url = quick_url + "?tocpath=_____7"
@@ -860,6 +1040,35 @@ def test_writer_drops_leading_heading_anchor_links_after_rewrite(tmp_path: Path)
     assert "[Q3 - 2026]" not in text
     assert "[Введение Example Product Docs](../_index.md) > План развития продукта" in text
     assert "### Q4 - 2026\n\n  * Обновленные модули." in text
+
+
+def test_writer_rewrites_html_table_links(tmp_path: Path) -> None:
+    parent_url = "https://example.com/ru/wiki"
+    child_url = "https://example.com/ru/wiki/child"
+    root = write_mirror(
+        [
+            Page(
+                source_url=parent_url,
+                canonical_url=parent_url,
+                title="Wiki",
+                markdown='<table><tr><td><a href="https://example.com/ru/wiki/child">Child</a></td></tr></table>\n',
+                depth=0,
+                links_internal=[child_url],
+            ),
+            Page(
+                source_url=child_url,
+                canonical_url=child_url,
+                title="Child",
+                markdown="Child.\n",
+                depth=1,
+            ),
+        ],
+        MirrorConfig(source=parent_url, out_dir=tmp_path),
+    )
+
+    text = (root / "ru" / "wiki" / "_index.md").read_text(encoding="utf-8")
+
+    assert '<a href="child/_index.md">Child</a>' in text
 
 
 def test_writer_creates_gramax_doc_root_next_to_content_folder(tmp_path: Path) -> None:

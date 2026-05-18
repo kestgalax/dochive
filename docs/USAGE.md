@@ -144,7 +144,9 @@ dochive structure \
 
 The command writes `_catalog/structure.yaml` under the mirror root. It stores known source URLs, navigation paths, parent links, order, placeholder status, and final Gramax paths. Later runs of `dochive mirror` against the same output directory reuse this file: missing pages remain placeholders, and separately mirrored sections fill the existing paths instead of creating a second layout.
 
-`--structure-mode auto` detects MadCap WebHelp navigation from `Data/HelpSystem.xml` and its TOC chunks when available. Use `--structure-mode toc` to require that TOC, or `--structure-mode links` to use link-based discovery. In TOC mode, `--scope subtree` means the selected user-visible TOC branch, not just the URL directory.
+`--structure-mode auto` is best for known documentation engines. For MadCap WebHelp, it detects navigation from `Data/HelpSystem.xml` and its TOC chunks when available. For Wiki.js-style sites, it falls back to link-based discovery and applies Wiki-friendly URL and cleanup rules for extensionless pages, language prefixes, service links, permalink heading anchors, and repeated site chrome.
+
+Use `--structure-mode toc` to require a MadCap TOC, or `--structure-mode links` to use link-based discovery directly. In TOC mode, `--scope subtree` means the selected user-visible TOC branch, not just the URL directory.
 
 Use `--include-url-prefix` when a documentation branch legitimately links outside the selected subtree but should still be eligible:
 
@@ -154,6 +156,20 @@ dochive structure \
   --out ./mirror \
   --scope subtree \
   --include-url-prefix "https://docs.example.com/shared/"
+```
+
+For a focused Wiki.js subtree, start from the actual language-prefixed page and keep `--scope subtree`:
+
+```bash
+dochive mirror \
+  --source "https://wiki.example.com/ru/advices" \
+  --out ./mirror \
+  --render-js \
+  --max-depth 10 \
+  --max-pages 1000 \
+  --scope subtree \
+  --structure-mode auto \
+  --save-assets images
 ```
 
 ## Mirror Local HTML
