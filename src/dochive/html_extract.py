@@ -239,7 +239,10 @@ def _sanitize_html_table(html: str, base_url: str) -> str:
     parser.close()
     rendered = "".join(parser.output).strip()
     if rendered.lower().startswith("<table") and rendered.lower().endswith("</table>"):
-        return rendered.replace("<table>", '<table header="row">', 1)
+        result = rendered.replace("<table>", '<table header="row">', 1)
+        result = re.sub(r"</tbody>\s*", "", result, flags=re.IGNORECASE)
+        result = re.sub(r"<tbody[^>]*>\s*", "", result, flags=re.IGNORECASE)
+        return result
     return ""
 
 
@@ -362,7 +365,9 @@ class _HtmlTableSanitizer(HTMLParser):
         self.output: list[str] = []
         self._skip_depth = 0
         self._in_td = False
-        self._td_content_started = False
+        self._in_list: str | None = None
+        self._link_text: list[str] = []
+        self._link_href: str | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
@@ -375,24 +380,46 @@ class _HtmlTableSanitizer(HTMLParser):
         if tag == "a":
             href = attrs_map.get("href", "").strip()
             if href:
-                self.output.append(f'<a href="{escape(urljoin(self.base_url, href), quote=True)}">')
+                self._link_href = urljoin(self.base_url, href)
+                self._link_text = []
             return
         if tag == "br":
             if self._in_td:
-                self.output.append("<br/>")
+                self.output.append("\n")
             return
         if tag in self._INLINE_TAGS:
-            self.output.append(f"<{tag}>")
+            if self._in_td:
+                self.output.append("**" if tag in {"strong", "b"} else "*")
+            else:
+                self.output.append(f"<{tag}>")
             return
         if tag in self._BLOCK_TAGS:
             if tag == "td":
                 self._in_td = True
-                self._td_content_started = False
+                self._in_list = None
                 attrs_str = self._render_attrs(attrs_map)
-                self.output.append(f"<td{attrs_str}>")
+                self.output.append(f"\n<td{attrs_str}>\n\n")
+                return
+            if tag == "tr":
+                self.output.append("\n<tr>\n")
                 return
             if self._in_td:
-                self.output.append(f"<{tag}>")
+                if tag == "ul":
+                    self._in_list = "ul"
+                    self.output.append("\n")
+                    return
+                if tag == "ol":
+                    self._in_list = "ol"
+                    self.output.append("\n")
+                    return
+                if tag == "li":
+                    marker = "-  " if self._in_list == "ul" else f"{self._td_list_index()}.  "
+                    self.output.append(f"\n{marker}")
+                    return
+                if tag == "p":
+                    self.output.append("\n")
+                    return
+                self.output.append(f"\n")
                 return
             self._append_newline()
             self.output.append(f"<{tag}{self._render_attrs(attrs_map)}>")
@@ -404,24 +431,52 @@ class _HtmlTableSanitizer(HTMLParser):
             return
         if self._skip_depth:
             return
-        if tag == "a":
-            self.output.append("</a>")
-        elif tag == "br":
+        if tag == "a" and self._link_href:
+            text = "".join(self._link_text).strip() or self._link_href
+            self.output.append(f"[{text}]({self._link_href})")
+            self._link_href = None
+            self._link_text = []
+            return
+        if tag == "br":
             pass
         elif tag in self._INLINE_TAGS:
-            self.output.append(f"</{tag}>")
+            if self._in_td:
+                self.output.append("**" if tag in {"strong", "b"} else "*")
+            else:
+                self.output.append(f"</{tag}>")
         elif tag in self._BLOCK_TAGS:
             if tag == "td":
                 self._in_td = False
-                self.output.append("</td>")
+                self._in_list = None
+                self.output.append("\n\n</td>")
+            elif tag == "tr":
+                self.output.append("\n</tr>\n")
+            elif tag == "table":
+                self.output.append("\n</table>")
             elif self._in_td:
-                self.output.append(f"</{tag}>")
+                if tag in {"ul", "ol"}:
+                    self._in_list = None
+                    self.output.append("\n")
+                elif tag == "p":
+                    pass
+                else:
+                    self.output.append("\n")
             else:
                 self.output.append(f"</{tag}>")
                 self._append_newline()
 
+    def _td_list_index(self) -> int:
+        count = 0
+        for item in self.output:
+            if item.startswith("\n") and ". " in item:
+                count += 1
+        return count + 1
+
     def handle_data(self, data: str) -> None:
         if self._skip_depth:
+            return
+        if self._link_href is not None:
+            self._link_text.append(data)
             return
         if self._in_td:
             self.output.append(data)

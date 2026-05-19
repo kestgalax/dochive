@@ -59,13 +59,40 @@ def test_injects_clean_html_table_for_multiline_wikijs_table() -> None:
     assert inject_html_tables(markdown, html, "https://example.com/ru/current") == """# Фаза
 
 <table header="row">
-<tbody>
-<tr><td rowspan="2">
-          <p><strong>Цели</strong></p>
-          <ul><li>Первый пункт</li><li>Второй пункт</li></ul>
-        </td><td><p><a href="https://example.com/ru/next">Следующая страница</a></p></td></tr>
-<tr><td><p><em>Выход</em></p></td></tr>
-</tbody>
+<tr>
+
+<td rowspan="2">
+
+
+          
+**Цели**
+          
+
+-  Первый пункт
+
+-  Второй пункт
+
+
+        
+
+</td>
+<td>
+
+
+[Следующая страница](https://example.com/ru/next)
+
+</td>
+</tr>
+
+<tr>
+
+<td>
+
+
+*Выход*
+
+</td>
+</tr>
 </table>
 
 ## После
@@ -82,7 +109,20 @@ Paragraph after table.
 """
 
     assert inject_html_tables(markdown, html, "https://example.com/docs") == """<table header="row">
-<tr><td>A</td><td>B</td></tr>
+<tr>
+
+<td>
+
+A
+
+</td>
+<td>
+
+B
+
+</td>
+</tr>
+
 </table>
 
 Paragraph after table.
