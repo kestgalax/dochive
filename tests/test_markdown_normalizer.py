@@ -454,3 +454,24 @@ Common label:
 
     assert promoted.index("### Q1 - 2023") < promoted.index("Common label:")
     assert promoted.index("### Q4 - 2022") > promoted.index("Common label:")
+
+
+def test_iframe_converted_to_link() -> None:
+    from dochive.html_extract import parse_html_document
+
+    html = '''
+<h1>Документы</h1>
+<p>Список документов:</p>
+<iframe class="airtable-embed" src="https://airtable.com/embed/app7pUKjVrkuUDJdv/shrokR65WxEtk8tOq?backgroundColor=blue&viewControls=on" frameborder="0" onmousewheel="" width="100%" height="200" style="background: transparent; border: 1px solid #ccc;"></iframe>
+<p>Конец раздела.</p>
+'''
+    result = parse_html_document(html, "https://example.com/")
+
+    # Проверяем, что iframe преобразован в ссылку
+    assert "https://airtable.com/embed/app7pUKjVrkuUDJdv/shrokR65WxEtk8tOq?backgroundColor=blue&viewControls=on" in result.markdown
+    # Проверяем, что ссылка оформлена как markdown
+    assert "[" in result.markdown and "]" in result.markdown
+    # Проверяем, что iframe добавлен в assets
+    assert len(result.assets) == 1
+    assert result.assets[0].source == "https://airtable.com/embed/app7pUKjVrkuUDJdv/shrokR65WxEtk8tOq?backgroundColor=blue&viewControls=on"
+    assert result.assets[0].kind == "files"

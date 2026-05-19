@@ -120,6 +120,12 @@ class HtmlDocumentParser(HTMLParser):
             src = attrs_map.get("src", "")
             if src:
                 self.assets.append(Asset(source=urljoin(self.base_url, src), kind="files"))
+        elif tag == "iframe":
+            src = attrs_map.get("src", "")
+            if src:
+                resolved = urljoin(self.base_url, src)
+                self.assets.append(Asset(source=resolved, kind="files"))
+                self._markdown.append(f"\n\n[{resolved}]({resolved})\n\n")
 
     def handle_endtag(self, tag: str) -> None:
         if tag in {"script", "style", "noscript", "svg"} and self._skip_depth:
