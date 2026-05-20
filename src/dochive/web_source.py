@@ -6,15 +6,21 @@ import re
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
-from .html_extract import extract_html_anchor_headings, extract_html_videos, inject_html_videos, promote_markdown_headings
+from .html_extract import (
+    extract_html_anchor_headings,
+    extract_html_videos,
+    inject_html_tables,
+    inject_html_videos,
+    promote_markdown_headings,
+)
 from .madcap_toc import discover_madcap_structure
 from .markdown_normalizer import normalize_markdown
 from .media_utils import extract_markdown_assets, merge_assets
 from .models import Asset, MirrorConfig, MirrorIssue, MirrorRun, Page, StructureEntry, StructureRun
 from .text_utils import repair_mojibake
-from .url_utils import HTML_SUFFIXES, canonicalize_url, extract_tocpath, same_domain
+from .url_utils import HTML_SUFFIXES, canonicalize_url, canonicalize_with_language_prefix, extract_tocpath, same_domain
 
 MARKDOWN_BREADCRUMB_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)|([^>\n]+)")
 
@@ -254,10 +260,16 @@ async def _build_navigation_index(
             href = item.get("href") if isinstance(item, dict) else None
             if not href:
                 continue
+            if _is_service_or_placeholder_href(href):
+                continue
             link_text = repair_mojibake(str(item.get("text") or item.get("title") or "")).strip()
             target_fetch_url = urljoin(entry.fetch_url, href)
-            target = canonicalize_url(target_fetch_url)
+            target = _canonicalize_crawl_url(target_fetch_url, root_url)
             if target == url:
+                continue
+            if target == root_url and url != root_url:
+                continue
+            if _is_service_or_placeholder_url(target):
                 continue
             if not _is_html_page_candidate(target):
                 continue
@@ -386,6 +398,7 @@ async def _fetch_pages_from_navigation_index(
         if html:
             markdown = promote_markdown_headings(markdown, html)
             markdown = inject_html_videos(markdown, html, entry.fetch_url)
+            markdown = inject_html_tables(markdown, html, entry.fetch_url)
         anchor_headings = extract_html_anchor_headings(html) if html else {}
         markdown = normalize_markdown(
             markdown,
@@ -452,6 +465,7 @@ async def _fetch_pages_from_structure_entries(
         if html:
             markdown = promote_markdown_headings(markdown, html)
             markdown = inject_html_videos(markdown, html, entry.fetch_url)
+            markdown = inject_html_tables(markdown, html, entry.fetch_url)
         anchor_headings = extract_html_anchor_headings(html) if html else {}
         markdown = normalize_markdown(
             markdown,
@@ -805,7 +819,11 @@ def _extract_page_links(
         href = item.get("href") if isinstance(item, dict) else None
         if not href:
             continue
-        target = canonicalize_url(urljoin(fetch_url, href))
+        if _is_service_or_placeholder_href(href):
+            continue
+        target = _canonicalize_crawl_url(urljoin(fetch_url, href), root_url)
+        if _is_service_or_placeholder_url(target):
+            continue
         if _is_allowed_url(target, root_url, allowed_prefixes, config):
             internal.append(target)
         else:
@@ -911,6 +929,11 @@ def _allowed_prefixes(root_url: str, config: MirrorConfig) -> tuple[str, ...]:
 
     parsed = urlparse(root_url)
     path = parsed.path or "/"
+    suffix = Path(unquote(path)).suffix.lower()
+    if path not in {"", "/"} and suffix not in HTML_SUFFIXES:
+        subtree_path = path.rstrip("/") + "/"
+        subtree = parsed._replace(path=subtree_path, params="", query="", fragment="").geturl()
+        return (canonicalize_url(root_url), subtree, *prefixes)
     if "/" in path.rstrip("/"):
         directory = path.rsplit("/", 1)[0].rstrip("/") + "/"
     else:
@@ -920,8 +943,40 @@ def _allowed_prefixes(root_url: str, config: MirrorConfig) -> tuple[str, ...]:
 
 
 def _is_allowed_url(target: str, root_url: str, allowed_prefixes: tuple[str, ...], config: MirrorConfig) -> bool:
+    if _is_service_or_placeholder_url(target):
+        return False
     if not same_domain(target, root_url):
         return config.include_external
     if config.scope == "domain":
         return True
     return any(target.startswith(prefix) for prefix in allowed_prefixes)
+
+
+def _canonicalize_crawl_url(url: str, root_url: str) -> str:
+    return canonicalize_with_language_prefix(url, root_url)
+
+
+def _is_service_or_placeholder_href(href: str) -> bool:
+    stripped = href.strip()
+    if not stripped or stripped in {"#", "...", "./...", "../..."}:
+        return True
+    parsed = urlparse(stripped)
+    if parsed.fragment and not parsed.path and not parsed.netloc:
+        return True
+    return _is_service_or_placeholder_path(parsed.path)
+
+
+def _is_service_or_placeholder_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return _is_service_or_placeholder_path(parsed.path)
+
+
+def _is_service_or_placeholder_path(path: str) -> bool:
+    parts = [unquote(part).strip().casefold() for part in path.split("/") if part.strip()]
+    if not parts:
+        return False
+    if parts[-1] in {"...", "login", "logout", "signin", "sign-in", "auth", "register"}:
+        return True
+    if len(parts) == 1 and parts[0] in {"t", "tags"}:
+        return True
+    return any(part in {"_profile", "_settings"} for part in parts)

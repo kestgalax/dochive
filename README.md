@@ -9,6 +9,8 @@ CLI tool for mirroring HTML documentation into a Markdown-first repository:
 - global `_catalog/*.yaml` files
 - deterministic URL/file mapping
 
+Dochive is general-purpose, but it has first-class support for MadCap WebHelp and Wiki.js-style documentation sites.
+
 ## Key Features
 
 - Mirrors HTML documentation into a Gramax-ready Markdown repository.
@@ -16,6 +18,7 @@ CLI tool for mirroring HTML documentation into a Markdown-first repository:
 - Preserves documentation hierarchy, page order, internal links, and `_index.md` pages for sections with children.
 - Discovers structure before content mirroring, so repeated and partial runs keep stable paths and placeholders.
 - Reads MadCap WebHelp navigation from `Data/HelpSystem.xml` when available instead of relying only on page links.
+- Handles Wiki.js-style extensionless URLs, language prefixes, service links, permalink heading anchors, and repeated site chrome.
 - Downloads or copies images into page-local media folders; HTML video sources can also be localized with `--save-assets videos`.
 - Renders images as Gramax `<image .../>` tags with intrinsic sizes or capped width.
 - Recovers headings from styled HTML patterns such as `p class="H4"` and MadCap `h2 data-mc-autonum`.
@@ -85,6 +88,14 @@ dochive mirror --source https://docs.example.com --out ./mirror --render-js --st
 `dochive structure` saves `_catalog/structure.yaml` with the known navigation tree and final Gramax paths. Later `mirror` runs reuse that structure, keeping placeholders stable until each section is mirrored.
 
 For MadCap WebHelp sites, `--structure-mode auto` reads the official TOC from `Data/HelpSystem.xml` when available, so `--scope subtree` follows the user-visible navigation branch.
+
+For Wiki.js sites, `--structure-mode auto` falls back to link-based discovery, keeps extensionless pages in Gramax `_index.md` layout, filters common service links such as login/tag routes, normalizes language-prefixed links, and removes typical Wiki.js chrome from mirrored Markdown.
+
+For a focused Wiki.js subtree, start from the actual language-prefixed page and keep `--scope subtree`:
+
+```bash
+dochive mirror --source https://wiki.example.com/ru/advices --out ./mirror --render-js --structure-mode auto --scope subtree --save-assets images
+```
 
 Useful commands:
 

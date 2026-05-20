@@ -21,3 +21,4 @@ tmp*/
 main_page/
 .DS_Store
 .pytest_cache
+example.md

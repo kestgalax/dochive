@@ -1,5 +1,5 @@
 from dochive.markdown_normalizer import normalize_markdown
-from dochive.html_extract import promote_markdown_headings
+from dochive.html_extract import inject_html_tables, promote_markdown_headings
 
 
 def test_separates_media_tags_with_blank_lines() -> None:
@@ -20,6 +20,112 @@ After.
 <image src="./demo.png" float="center"/>
 
 Done.
+"""
+
+
+def test_injects_clean_html_table_for_multiline_wikijs_table() -> None:
+    html = """
+<figure class="table">
+  <table>
+    <tbody>
+      <tr>
+        <td style="color:red" rowspan="2">
+          <p><strong>Цели</strong></p>
+          <ul><li>Первый пункт</li><li>Второй пункт</li></ul>
+        </td>
+        <td><p><a href="/ru/next">Следующая страница</a></p></td>
+      </tr>
+      <tr><td><p><em>Выход</em></p></td></tr>
+    </tbody>
+  </table>
+</figure>
+"""
+    markdown = """
+# Фаза
+| **Цели**
+  * Первый пункт
+  * Второй пункт
+
+ | [Следующая страница](https://example.com/ru/next)
+ |
+| --- | --- |
+| | *Выход* |
+**Участники**
+  * Участник
+
+## После
+"""
+
+    assert inject_html_tables(markdown, html, "https://example.com/ru/current") == """# Фаза
+
+<table header="row">
+<tr>
+
+<td rowspan="2">
+
+
+          
+**Цели**
+          
+
+-  Первый пункт
+
+-  Второй пункт
+
+
+        
+
+</td>
+<td>
+
+
+[Следующая страница](https://example.com/ru/next)
+
+</td>
+</tr>
+
+<tr>
+
+<td>
+
+
+*Выход*
+
+</td>
+</tr>
+</table>
+
+## После
+"""
+
+
+def test_inject_html_tables_keeps_paragraph_after_regular_markdown_table() -> None:
+    html = "<table><tr><td>A</td><td>B</td></tr></table>"
+    markdown = """
+| A | B |
+| --- | --- |
+| C | D |
+Paragraph after table.
+"""
+
+    assert inject_html_tables(markdown, html, "https://example.com/docs") == """<table header="row">
+<tr>
+
+<td>
+
+A
+
+</td>
+<td>
+
+B
+
+</td>
+</tr>
+
+</table>
+
+Paragraph after table.
 """
 
 
@@ -247,6 +353,75 @@ Press Ctrl+Enter to report a documentation issue.
     assert normalize_markdown(markdown) == "# Article title\n\nMain article text.\n"
 
 
+def test_drops_generic_tail_powered_by_footer() -> None:
+    markdown = """
+# Article title
+
+Main article text.
+
+2026 Example Docs. Все права защищены. | Powered by [Wiki.js](https://wiki.js.org)
+"""
+
+    assert normalize_markdown(markdown) == "# Article title\n\nMain article text.\n"
+
+
+def test_keeps_mid_article_engine_mentions() -> None:
+    markdown = """
+# Article title
+
+This article explains how Powered by Wiki.js footers work.
+
+Useful content after the mention.
+"""
+
+    assert normalize_markdown(markdown) == (
+        "# Article title\n\n"
+        "This article explains how Powered by Wiki.js footers work.\n\n"
+        "Useful content after the mention.\n"
+    )
+
+
+def test_normalizes_inline_heading_permalinks() -> None:
+    markdown = """
+# [¶](#¶ Журнал изменений) Журнал изменений
+## [#](#install) Install
+### []( #empty ) Empty label
+#### [¶](https://example.com/docs/page#absolute) **Absolute Link**
+##### [¶](#¶ QA (with parentheses)) QA (with parentheses)
+## ¶ AI
+## [¶](#¶ AI) AI
+"""
+
+    assert normalize_markdown(markdown) == (
+        "# Журнал изменений\n"
+        "## Install\n"
+        "### Empty label\n"
+        "#### Absolute Link\n"
+        "##### QA (with parentheses)\n"
+        "## AI\n"
+    )
+
+
+def test_trims_leading_wikistyle_navigation_before_plain_title_and_subheading() -> None:
+    markdown = """
+Wiki Example. Knowledge base.
+Search...
+[](https://example.com/t)
+[](https://example.com/login)
+[Structure](https://example.com/ru/structure)
+Regulations
+[Standard](https://example.com/ru/standard)[Enterprise](https://example.com/ru/enterprise)
+  * /
+[advices](../_index.md)
+
+Principles for working on tasks
+## [¶](https://example.com/advices/work#principle-1) Principle 1
+Body text.
+"""
+
+    assert normalize_markdown(markdown) == "Principles for working on tasks\n## Principle 1\nBody text.\n"
+
+
 def test_promote_markdown_headings_drops_later_duplicate_after_anchor_insertion() -> None:
     html = """
 <p class="H3"><a name="Q4_22"></a>Q4 - 2022</p>
@@ -279,3 +454,24 @@ Common label:
 
     assert promoted.index("### Q1 - 2023") < promoted.index("Common label:")
     assert promoted.index("### Q4 - 2022") > promoted.index("Common label:")
+
+
+def test_iframe_converted_to_link() -> None:
+    from dochive.html_extract import parse_html_document
+
+    html = '''
+<h1>Документы</h1>
+<p>Список документов:</p>
+<iframe class="airtable-embed" src="https://airtable.com/embed/app7pUKjVrkuUDJdv/shrokR65WxEtk8tOq?backgroundColor=blue&viewControls=on" frameborder="0" onmousewheel="" width="100%" height="200" style="background: transparent; border: 1px solid #ccc;"></iframe>
+<p>Конец раздела.</p>
+'''
+    result = parse_html_document(html, "https://example.com/")
+
+    # Проверяем, что iframe преобразован в ссылку
+    assert "https://airtable.com/embed/app7pUKjVrkuUDJdv/shrokR65WxEtk8tOq?backgroundColor=blue&viewControls=on" in result.markdown
+    # Проверяем, что ссылка оформлена как markdown
+    assert "[" in result.markdown and "]" in result.markdown
+    # Проверяем, что iframe добавлен в assets
+    assert len(result.assets) == 1
+    assert result.assets[0].source == "https://airtable.com/embed/app7pUKjVrkuUDJdv/shrokR65WxEtk8tOq?backgroundColor=blue&viewControls=on"
+    assert result.assets[0].kind == "files"

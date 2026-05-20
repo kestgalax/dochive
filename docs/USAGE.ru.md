@@ -144,7 +144,9 @@ dochive structure \
 
 Команда записывает `_catalog/structure.yaml` внутри mirror root. В нём сохраняются известные source URLs, navigation paths, parent links, order, placeholder status и итоговые Gramax paths. Последующие запуски `dochive mirror` в ту же output directory переиспользуют этот файл: отсутствующие страницы остаются placeholders, а отдельно зеркалированные разделы заполняют существующие пути вместо создания второй раскладки.
 
-`--structure-mode auto` обнаруживает MadCap WebHelp navigation из `Data/HelpSystem.xml` и его TOC chunks, когда они доступны. Используйте `--structure-mode toc`, чтобы требовать этот TOC, или `--structure-mode links`, чтобы использовать link-based discovery. В TOC mode `--scope subtree` означает выбранную пользовательскую ветку TOC, а не только URL directory.
+`--structure-mode auto` лучше всего подходит для известных documentation engines. Для MadCap WebHelp он обнаруживает navigation из `Data/HelpSystem.xml` и его TOC chunks, когда они доступны. Для Wiki.js-style sites он откатывается к link-based discovery и применяет правила, удобные для Wiki.js: extensionless pages, language prefixes, service links, permalink heading anchors и повторяющийся site chrome.
+
+Используйте `--structure-mode toc`, чтобы требовать MadCap TOC, или `--structure-mode links`, чтобы использовать link-based discovery напрямую. В TOC mode `--scope subtree` означает выбранную пользовательскую ветку TOC, а не только URL directory.
 
 Используйте `--include-url-prefix`, когда documentation branch легитимно ссылается за пределы выбранного subtree, но такие страницы тоже должны быть доступны:
 
@@ -154,6 +156,20 @@ dochive structure \
   --out ./mirror \
   --scope subtree \
   --include-url-prefix "https://docs.example.com/shared/"
+```
+
+Для focused Wiki.js subtree начинайте с фактической страницы с language prefix и оставляйте `--scope subtree`:
+
+```bash
+dochive mirror \
+  --source "https://wiki.example.com/ru/advices" \
+  --out ./mirror \
+  --render-js \
+  --max-depth 10 \
+  --max-pages 1000 \
+  --scope subtree \
+  --structure-mode auto \
+  --save-assets images
 ```
 
 ## Зеркалирование локального HTML

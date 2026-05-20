@@ -13,14 +13,17 @@ from dochive.models import MirrorConfig
 from dochive.models import Page
 from dochive.models import StructureEntry
 from dochive.web_source import (
+    _allowed_prefixes,
     _build_navigation_index,
+    _canonicalize_crawl_url,
     _fetch_pages_from_structure_entries,
+    _is_allowed_url,
     _nav_path_points_to_current_page,
     _navigation_entries_to_structure,
     _remember_navigation_hint,
     _structure_root_fetch_url,
 )
-from dochive.url_utils import canonicalize_url, extract_tocpath
+from dochive.url_utils import canonicalize_url, canonicalize_with_language_prefix, extract_tocpath, url_to_markdown_relpath
 from dochive.writer import write_mirror
 
 
@@ -48,6 +51,37 @@ def test_canonical_url_drops_tocpath_but_tocpath_can_be_extracted() -> None:
 
     assert canonicalize_url(url) == "https://docs.example.com/product_docs/Content/spm/functionality.htm"
     assert extract_tocpath(url) == ("Practices Product Docs", "Service Management")
+
+
+def test_url_root_maps_to_gramax_root_index() -> None:
+    assert url_to_markdown_relpath("https://example.com/") == Path("_index.md")
+
+
+def test_wikistyle_subtree_scope_uses_start_page_as_section_root() -> None:
+    config = MirrorConfig(source="https://example.com/ru/advices", out_dir=Path("."))
+    prefixes = _allowed_prefixes("https://example.com/ru/advices", config)
+
+    assert "https://example.com/ru/advices" in prefixes
+    assert "https://example.com/ru/advices/" in prefixes
+    assert _is_allowed_url("https://example.com/ru/advices/work", "https://example.com/ru/advices", prefixes, config)
+    assert not _is_allowed_url("https://example.com/ru/other", "https://example.com/ru/advices", prefixes, config)
+
+
+def test_crawl_url_normalizes_missing_language_prefix_within_source_subtree() -> None:
+    root = "https://example.com/ru/advices"
+
+    assert _canonicalize_crawl_url("https://example.com/advices/work", root) == "https://example.com/ru/advices/work"
+    assert _canonicalize_crawl_url("https://example.com/other/work", root) == "https://example.com/other/work"
+    assert canonicalize_with_language_prefix("https://example.com/advices/work", root) == "https://example.com/ru/advices/work"
+
+
+def test_service_and_placeholder_urls_are_not_allowed() -> None:
+    config = MirrorConfig(source="https://example.com/ru/advices", out_dir=Path("."))
+    prefixes = _allowed_prefixes("https://example.com/ru/advices", config)
+
+    assert not _is_allowed_url("https://example.com/ru/advices/...", "https://example.com/ru/advices", prefixes, config)
+    assert not _is_allowed_url("https://example.com/login", "https://example.com/ru/advices", prefixes, config)
+    assert not _is_allowed_url("https://example.com/t", "https://example.com/", ("https://example.com/",), config)
 
 
 def test_extract_tocpath_accepts_madcap_query_casing() -> None:
@@ -466,6 +500,33 @@ def test_navigation_index_adds_plain_links_within_allowed_scope() -> None:
     assert entries[old_url].fetch_url == old_url
     assert entries[old_url].depth == 1
     assert entries[old_url].nav_parent_url == root_url
+
+
+def test_navigation_index_does_not_reparent_root_from_child_link() -> None:
+    root_url = "https://example.com/"
+    child_url = "https://example.com/ru/advices"
+    crawler = FakeCrawler(
+        {
+            root_url: FakeCrawlResult("Home - Example Docs", [{"href": child_url, "text": "Advices"}]),
+            child_url: FakeCrawlResult("Advices - Example Docs", [{"href": root_url, "text": "Home"}]),
+        }
+    )
+
+    entries, issues = asyncio.run(
+        _build_navigation_index(
+            crawler,
+            object(),
+            MirrorConfig(source=root_url, out_dir=Path("."), max_depth=3, max_pages=10),
+            root_url=root_url,
+            root_fetch_url=root_url,
+            root_nav_path=(),
+            allowed_prefixes=("https://example.com/",),
+        )
+    )
+
+    assert issues == []
+    assert entries[root_url].nav_parent_url is None
+    assert entries[child_url].nav_parent_url == root_url
 
 
 def test_navigation_index_plain_link_inherits_parent_nav_path() -> None:

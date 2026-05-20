@@ -21,14 +21,21 @@ from .html_extract import is_local_file_reference
 from .image_size import read_image_size
 from .markdown_normalizer import _drop_leading_heading_anchor_links
 from .models import Asset, MirrorConfig, MirrorIssue, Page, StructureEntry, StructureRun
-from .url_utils import canonicalize_url, is_url, short_hash, source_root_name, url_to_markdown_relpath
+from .url_utils import (
+    canonicalize_url,
+    canonicalize_with_language_prefix,
+    is_url,
+    short_hash,
+    source_root_name,
+    url_to_markdown_relpath,
+)
 from .yaml_writer import dumps_yaml
 
 LINK_RE = re.compile(r"(!?\[[^\]]*\]\()([^)]+)(\))")
 NESTED_IMAGE_LINK_RE = re.compile(r"\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)")
 IMAGE_TEXT_LINK_RE = re.compile(r"\[!\[[^\]]*\]\([^)]+\)([^\]]+)\]\(([^)]+)\)")
 HTML_MEDIA_URL_RE = re.compile(
-    r"(<(?:video|source)\b[^>]*\b(?:path|src)=[\"'])([^\"']+)([\"'][^>]*>)",
+    r"(<(?:a|video|source)\b[^>]*\b(?:href|path|src)=[\"'])([^\"']+)([\"'][^>]*>)",
     re.IGNORECASE,
 )
 DOC_ROOT_FILENAME = ".doc-root.yaml"
@@ -432,6 +439,8 @@ def _apply_structure_to_pages(
         if not isinstance(canonical_url, str) or not canonical_url:
             continue
         nav_path = _catalog_nav_path(item)
+        if not nav_path:
+            continue
         nav_parent_url = item.get("nav_parent_url")
         nav_parent = nav_parent_url if isinstance(nav_parent_url, str) and nav_parent_url else None
         depth = int(item.get("depth") or 0)
@@ -524,6 +533,8 @@ def _structure_path_for_page(page: Page, structure_items: list[dict[str, object]
     for item in structure_items:
         if item.get("canonical_url") != page.canonical_url:
             continue
+        if not _catalog_nav_path(item):
+            continue
         path = item.get("path")
         if isinstance(path, str) and path:
             return PurePosixPath(path)
@@ -585,7 +596,7 @@ def _catalog_path_for_page(page: Page, previous_pages: list[dict[str, object]]) 
             continue
         relpath = PurePosixPath(path)
         canonical_url = item.get("canonical_url")
-        if isinstance(canonical_url, str) and canonical_url:
+        if isinstance(canonical_url, str) and canonical_url and _catalog_path_is_reusable(canonical_url, relpath, item):
             by_url[canonical_url] = relpath
         nav_path = _catalog_nav_path(item)
         if nav_path:
@@ -596,6 +607,19 @@ def _catalog_path_for_page(page: Page, previous_pages: list[dict[str, object]]) 
     if len(page.nav_path) > 1 and (parent_path := by_nav_path.get(page.nav_path[:-1])):
         return _move_page_under_folder(url_to_markdown_relpath(page.canonical_url), parent_path.parent)
     return None
+
+
+def _catalog_path_is_reusable(canonical_url: str, relpath: PurePosixPath, item: dict[str, object]) -> bool:
+    if _catalog_nav_path(item):
+        return True
+    source_relpath = url_to_markdown_relpath(canonical_url)
+    source_parts = source_relpath.parts
+    rel_parts = relpath.parts
+    if not source_parts or not rel_parts:
+        return False
+    if source_parts[0] in {"index.md", "_index.md"}:
+        return True
+    return rel_parts[0].casefold() == source_parts[0].casefold()
 
 
 def _catalog_nav_path(item: dict[str, object]) -> tuple[str, ...]:
@@ -1144,8 +1168,12 @@ def _render_details_sections(markdown: str) -> str:
 
 
 def _details_summary_text(line: str) -> str | None:
-    match = re.fullmatch(r"\[(Подробное описание|Подробнее)\]\([^)]+\)", line.strip(), re.IGNORECASE)
-    return match.group(1) if match else None
+    stripped = line.strip()
+    if match := re.fullmatch(r"\[(Подробное описание|Читать далее)\]\([^)]+\)", stripped, re.IGNORECASE):
+        return match.group(1)
+    if stripped in {"Подробное описание", "Подробнее", "Читать далее"}:
+        return stripped
+    return None
 
 
 def _details_boundary_line(line: str) -> bool:
@@ -1359,7 +1387,7 @@ def _relative_asset_path(asset: Asset, current_relpath: PurePosixPath) -> str:
 
 def _normalize_markdown_target(target: str, page: Page) -> str:
     if is_url(target):
-        return target.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+        return canonicalize_with_language_prefix(target, page.canonical_url)
     if page.source_path and is_local_file_reference(target):
         parsed = urlparse(target)
         if parsed.scheme == "file":
@@ -1368,7 +1396,7 @@ def _normalize_markdown_target(target: str, page: Page) -> str:
             local = (page.source_path.parent / unquote(parsed.path)).resolve()
         return local.as_uri().rstrip("/")
     if is_url(page.canonical_url):
-        return canonicalize_url(target, page.canonical_url)
+        return canonicalize_with_language_prefix(canonicalize_url(target, page.canonical_url), page.canonical_url)
     return target
 
 
