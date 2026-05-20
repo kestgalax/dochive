@@ -91,6 +91,12 @@ dochive mirror --source https://docs.example.com --out ./mirror --render-js --st
 
 Для сайтов Wiki.js `--structure-mode auto` откатывается к link-based discovery, сохраняет extensionless pages в Gramax layout с `_index.md`, фильтрует типичные service links вроде login/tag routes, нормализует ссылки с language prefix и удаляет характерный Wiki.js chrome из mirrored Markdown.
 
+Для focused Wiki.js subtree начинайте с фактической страницы с language prefix и оставляйте `--scope subtree`:
+
+```bash
+dochive mirror --source https://wiki.example.com/ru/advices --out ./mirror --render-js --structure-mode auto --scope subtree --save-assets images
+```
+
 Полезные команды:
 
 ```bash

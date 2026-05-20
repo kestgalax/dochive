@@ -91,6 +91,12 @@ For MadCap WebHelp sites, `--structure-mode auto` reads the official TOC from `D
 
 For Wiki.js sites, `--structure-mode auto` falls back to link-based discovery, keeps extensionless pages in Gramax `_index.md` layout, filters common service links such as login/tag routes, normalizes language-prefixed links, and removes typical Wiki.js chrome from mirrored Markdown.
 
+For a focused Wiki.js subtree, start from the actual language-prefixed page and keep `--scope subtree`:
+
+```bash
+dochive mirror --source https://wiki.example.com/ru/advices --out ./mirror --render-js --structure-mode auto --scope subtree --save-assets images
+```
+
 Useful commands:
 
 ```bash
