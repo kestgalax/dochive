@@ -370,10 +370,11 @@ _catalog/structure.yaml
 _catalog/pages.yaml
 _catalog/links.yaml
 _catalog/assets.yaml
+_catalog/context_index.jsonl
 _catalog/errors.yaml
 ```
 
-Each folder also receives `_index.yaml` for deterministic hierarchy and catalog navigation. LLM-oriented retrieval is planned in the [roadmap](ROADMAP.md).
+Each folder also receives `_index.yaml` for deterministic hierarchy and catalog navigation.
 
 ## Lexical Search
 
@@ -382,6 +383,24 @@ dochive query --root .\mirror\docs.example.com --text "quick start" --limit 5
 ```
 
 `dochive query` currently performs lexical file search over Markdown and YAML only. Future context indexing, recursive retrieval, vector/non-vector retrieval strategy, Telegram bot, and LLM assistant ideas are tracked in the [roadmap](ROADMAP.md).
+
+## Context Index And Retrieval
+
+Build a heading-aware context index after mirroring:
+
+```powershell
+dochive index --root .\mirror\docs.example.com
+```
+
+The command writes `_catalog/context_index.jsonl`. Each JSONL record is a page or section context unit with a stable `mirror://...` URI, source URL, heading chain, abstract, text, terms, links, assets, and content hash.
+
+Retrieve context from the index:
+
+```powershell
+dochive retrieve --root .\mirror\docs.example.com --text "quick start" --format json --trace
+```
+
+`dochive retrieve` is deterministic and lexical. It scores title, headings, terms, text, and path matches; `--trace` includes `why` reasons for each result. LLM reranking, recursive directory routing, answer generation, and multimodal image interpretation remain roadmap items.
 
 ## Inspect Incremental Sync
 

@@ -21,7 +21,7 @@ CLI-инструмент для зеркалирования HTML-докумен
 - Восстанавливает заголовки из HTML-паттернов стилей, например `p class="H4"` и MadCap `h2 data-mc-autonum`.
 - Очищает типичный шум документации, включая повторяющийся page chrome, выбранные tags, selectors и точные noisy lines.
 - Записывает каталоги и отчёты по страницам, ссылкам, assets, структуре, ошибкам и incremental sync.
-- Предоставляет lexical search и Git publish helpers для mirrored repositories.
+- Предоставляет lexical search, heading-aware context retrieval и Git publish helpers для mirrored repositories.
 
 ## Установка
 
@@ -91,6 +91,8 @@ dochive mirror --source https://docs.example.com --out ./mirror --render-js --st
 ```bash
 dochive catalog --root ./mirror/docs.example.com
 dochive query --root ./mirror/docs.example.com --text "quick start" --limit 5
+dochive index --root ./mirror/docs.example.com
+dochive retrieve --root ./mirror/docs.example.com --text "quick start" --format json --trace
 dochive publish --root ./mirror/docs.example.com --dry-run --init
 ```
 

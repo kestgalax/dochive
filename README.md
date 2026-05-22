@@ -21,7 +21,7 @@ CLI tool for mirroring HTML documentation into a Markdown-first repository:
 - Recovers headings from styled HTML patterns such as `p class="H4"` and MadCap `h2 data-mc-autonum`.
 - Cleans common documentation noise, including repeated page chrome, selected tags, selectors, and exact noisy lines.
 - Writes catalogs and reports for pages, links, assets, structure, errors, and incremental sync.
-- Provides lexical search and Git publish helpers for mirrored repositories.
+- Provides lexical search, heading-aware context retrieval, and Git publish helpers for mirrored repositories.
 
 ## Install
 
@@ -91,6 +91,8 @@ Useful commands:
 ```bash
 dochive catalog --root ./mirror/docs.example.com
 dochive query --root ./mirror/docs.example.com --text "quick start" --limit 5
+dochive index --root ./mirror/docs.example.com
+dochive retrieve --root ./mirror/docs.example.com --text "quick start" --format json --trace
 dochive publish --root ./mirror/docs.example.com --dry-run --init
 ```
 

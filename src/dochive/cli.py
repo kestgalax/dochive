@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
+from .context import retrieval_payload, write_context_index
 from .local_source import crawl_local_html
 from .models import MirrorConfig
 from .publish import publish_mirror
@@ -24,6 +26,10 @@ def main(argv: list[str] | None = None) -> int:
         return catalog_command(args)
     if args.command == "query":
         return query_command(args)
+    if args.command == "index":
+        return index_command(args)
+    if args.command == "retrieve":
+        return retrieve_command(args)
     if args.command == "publish":
         return publish_command(args)
     parser.print_help()
@@ -164,6 +170,16 @@ def build_parser() -> argparse.ArgumentParser:
     query.add_argument("--text", required=True, help="Search query.")
     query.add_argument("--limit", type=int, default=10, help="Maximum number of hits.")
 
+    index = subparsers.add_parser("index", help="Build a context index for a mirrored Markdown knowledge base.")
+    index.add_argument("--root", required=True, type=Path, help="Mirror root directory.")
+
+    retrieve = subparsers.add_parser("retrieve", help="Retrieve heading-aware context from a context index.")
+    retrieve.add_argument("--root", required=True, type=Path, help="Mirror root directory.")
+    retrieve.add_argument("--text", required=True, help="Retrieval query.")
+    retrieve.add_argument("--limit", type=int, default=10, help="Maximum number of context results.")
+    retrieve.add_argument("--format", choices=("json",), default="json", help="Output format.")
+    retrieve.add_argument("--trace", action="store_true", help="Include scoring reasons for each result.")
+
     publish = subparsers.add_parser("publish", help="Commit and optionally push a mirror directory with Git.")
     publish.add_argument("--root", required=True, type=Path, help="Mirror root directory or Git worktree.")
     publish.add_argument("--message", default="Update documentation mirror", help="Commit message.")
@@ -261,6 +277,7 @@ def catalog_command(args: argparse.Namespace) -> int:
         "pages.yaml",
         "links.yaml",
         "assets.yaml",
+        "context_index.jsonl",
         "errors.yaml",
     ):
         path = root / "_catalog" / name
@@ -276,6 +293,27 @@ def query_command(args: argparse.Namespace) -> int:
     for index, hit in enumerate(hits, start=1):
         print(f"{index}. score={hit.score} {hit.path}")
         print(f"   {hit.snippet}")
+    return 0
+
+
+def index_command(args: argparse.Namespace) -> int:
+    try:
+        index_path = write_context_index(args.root)
+    except Exception as exc:  # pragma: no cover - CLI boundary
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    line_count = sum(1 for line in index_path.read_text(encoding="utf-8").splitlines() if line.strip())
+    print(f"Indexed {line_count} context units into {index_path}")
+    return 0
+
+
+def retrieve_command(args: argparse.Namespace) -> int:
+    try:
+        payload = retrieval_payload(args.root, args.text, limit=args.limit, trace=args.trace)
+    except Exception as exc:  # pragma: no cover - CLI boundary
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 
