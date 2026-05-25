@@ -4,7 +4,7 @@ import hashlib
 import re
 from pathlib import Path
 from pathlib import PurePosixPath
-from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urljoin, urlparse, urlunparse
 
 
 HTML_SUFFIXES = {".html", ".htm", ".xhtml"}
@@ -24,6 +24,21 @@ def canonicalize_url(url: str, base_url: str | None = None) -> str:
     if path != "/" and path.endswith("/"):
         path = path.rstrip("/")
     return urlunparse((scheme, netloc, path, "", "", ""))
+
+
+def canonicalize_confluence_url(url: str, base_url: str | None = None) -> str:
+    canonical = canonicalize_url(url, base_url)
+    absolute = urljoin(base_url or "", url)
+    parsed = urlparse(absolute)
+    path_name = parsed.path.rsplit("/", 1)[-1].casefold()
+    if path_name != "viewpage.action":
+        return canonical
+    query = parse_qs(parsed.query, keep_blank_values=False)
+    page_ids = next((value for key, value in query.items() if key.casefold() == "pageid"), [])
+    if not page_ids:
+        return canonical
+    canonical_parsed = urlparse(canonical)
+    return canonical_parsed._replace(query=urlencode({"pageId": page_ids[0]})).geturl()
 
 
 def canonicalize_with_language_prefix(url: str, root_url: str) -> str:
@@ -71,6 +86,7 @@ def same_domain(url: str, root_url: str) -> bool:
 
 def url_to_markdown_relpath(url: str) -> PurePosixPath:
     parsed = urlparse(canonicalize_url(url))
+    page_id = _confluence_page_id(url)
     path = unquote(parsed.path or "/")
     if path in {"", "/"}:
         return PurePosixPath("_index.md")
@@ -84,7 +100,10 @@ def url_to_markdown_relpath(url: str) -> PurePosixPath:
         parts[-1] = slugify(last.stem) + ".md"
         return PurePosixPath(*parts)
     if last.suffix:
-        parts[-1] = slugify(last.stem) + ".md"
+        stem = slugify(last.stem)
+        if last.suffix.lower() == ".action" and page_id:
+            stem = f"{stem}-{slugify(page_id)}"
+        parts[-1] = stem + ".md"
         return PurePosixPath(*parts)
     return PurePosixPath(*parts, "_index.md")
 
@@ -107,3 +126,12 @@ def slugify(value: str) -> str:
 
 def short_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _confluence_page_id(url: str) -> str | None:
+    parsed = urlparse(url)
+    if parsed.path.rsplit("/", 1)[-1].casefold() != "viewpage.action":
+        return None
+    query = parse_qs(parsed.query, keep_blank_values=False)
+    values = next((value for key, value in query.items() if key.casefold() == "pageid"), [])
+    return values[0] if values else None

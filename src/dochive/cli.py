@@ -12,6 +12,8 @@ from .url_utils import is_url
 from .web_source import build_web_structure, crawl_web
 from .writer import write_mirror, write_structure_catalog
 
+SOURCE_TYPE_CHOICES = ("auto", "generic", "madcap", "wikijs", "confluence")
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
@@ -40,6 +42,23 @@ def build_parser() -> argparse.ArgumentParser:
     mirror.add_argument("--max-depth", type=int, default=3)
     mirror.add_argument("--max-pages", type=int, default=500)
     mirror.add_argument("--render-js", action="store_true", help="Use browser rendering for web sources.")
+    mirror.add_argument(
+        "--source-type",
+        choices=SOURCE_TYPE_CHOICES,
+        default="auto",
+        help="Source profile. `auto` preserves existing MadCap/generic behavior; `confluence` is opt-in.",
+    )
+    mirror.add_argument(
+        "--auth",
+        choices=("none", "bearer"),
+        default="none",
+        help="Authentication mode for protected sources. Currently supported for `--source-type confluence`.",
+    )
+    mirror.add_argument(
+        "--auth-token-env",
+        default="DOCHIVE_AUTH_TOKEN",
+        help="Environment variable that contains the bearer token.",
+    )
     mirror.add_argument("--include-external", action="store_true", help="Keep external crawl targets eligible. Reserved for later.")
     mirror.add_argument(
         "--scope",
@@ -117,6 +136,23 @@ def build_parser() -> argparse.ArgumentParser:
     structure.add_argument("--out", required=True, type=Path, help="Output directory.")
     structure.add_argument("--max-depth", type=int, default=3)
     structure.add_argument("--max-pages", type=int, default=500)
+    structure.add_argument(
+        "--source-type",
+        choices=SOURCE_TYPE_CHOICES,
+        default="auto",
+        help="Source profile. `auto` preserves existing MadCap/generic behavior; `confluence` is opt-in.",
+    )
+    structure.add_argument(
+        "--auth",
+        choices=("none", "bearer"),
+        default="none",
+        help="Authentication mode for protected sources. Currently supported for `--source-type confluence`.",
+    )
+    structure.add_argument(
+        "--auth-token-env",
+        default="DOCHIVE_AUTH_TOKEN",
+        help="Environment variable that contains the bearer token.",
+    )
     structure.add_argument(
         "--scope",
         choices=("subtree", "domain"),
@@ -208,6 +244,9 @@ def structure_command(args: argparse.Namespace) -> int:
         exclude_tags=tuple(args.exclude_tag) if args.exclude_tag else ("script", "style", "noscript"),
         anti_bot_mode=args.anti_bot,
         structure_mode=args.structure_mode,
+        source_type=args.source_type,
+        auth_mode=args.auth,
+        auth_token_env=args.auth_token_env,
     )
 
     try:
@@ -248,6 +287,9 @@ def _mirror_config_from_args(args: argparse.Namespace) -> MirrorConfig:
         image_max_width=args.image_max_width,
         anti_bot_mode=args.anti_bot,
         structure_mode=args.structure_mode,
+        source_type=args.source_type,
+        auth_mode=args.auth,
+        auth_token_env=args.auth_token_env,
     )
 
 

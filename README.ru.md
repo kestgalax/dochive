@@ -97,6 +97,14 @@ dochive mirror --source https://docs.example.com --out ./mirror --render-js --st
 dochive mirror --source https://wiki.example.com/ru/advices --out ./mirror --render-js --structure-mode auto --scope subtree --save-assets images
 ```
 
+Для защищённых страниц Confluence Server/Data Center, которые принимают Resolution API Token Authentication, включайте отдельный Confluence-профиль и передавайте bearer token через `.env` или process environment:
+
+```bash
+cp .env.example .env
+# отредактируйте .env и задайте DOCHIVE_AUTH_TOKEN
+dochive mirror --source "https://wiki.example.com/pages/viewpage.action?pageId=123" --out ./mirror --render-js --source-type confluence --auth bearer --scope subtree --save-assets images
+```
+
 Полезные команды:
 
 ```bash

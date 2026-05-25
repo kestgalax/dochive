@@ -97,6 +97,14 @@ For a focused Wiki.js subtree, start from the actual language-prefixed page and 
 dochive mirror --source https://wiki.example.com/ru/advices --out ./mirror --render-js --structure-mode auto --scope subtree --save-assets images
 ```
 
+For protected Confluence Server/Data Center pages that accept Resolution API Token Authentication, opt in to the isolated Confluence profile and pass a bearer token through `.env` or the process environment:
+
+```bash
+cp .env.example .env
+# edit .env and set DOCHIVE_AUTH_TOKEN
+dochive mirror --source "https://wiki.example.com/pages/viewpage.action?pageId=123" --out ./mirror --render-js --source-type confluence --auth bearer --scope subtree --save-assets images
+```
+
 Useful commands:
 
 ```bash

@@ -10,13 +10,14 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
-from urllib.request import url2pathname, urlopen
+from urllib.request import Request, url2pathname, urlopen
 
 try:
     import certifi
 except ImportError:  # pragma: no cover - fallback for minimal embedded environments
     certifi = None
 
+from .auth import request_headers
 from .html_extract import is_local_file_reference
 from .image_size import read_image_size
 from .markdown_normalizer import _drop_leading_heading_anchor_links
@@ -1436,7 +1437,7 @@ def _materialize_assets(
                 materialized.append(asset)
                 continue
             elif is_url(asset.source):
-                _download_url(asset.source, target)
+                _download_url(asset.source, target, config)
                 materialized.append(_asset_with_local_metadata(asset, target_rel.as_posix(), target))
                 continue
         except OSError as exc:
@@ -1454,11 +1455,12 @@ def _materialize_assets(
     return materialized, errors
 
 
-def _download_url(source: str, target: Path) -> None:
+def _download_url(source: str, target: Path, config: MirrorConfig) -> None:
     context = None
     if certifi is not None:
         context = ssl.create_default_context(cafile=certifi.where())
-    with urlopen(source, context=context) as response, target.open("wb") as output:
+    request = Request(source, headers=request_headers(config))
+    with urlopen(request, context=context) as response, target.open("wb") as output:
         shutil.copyfileobj(response, output)
 
 

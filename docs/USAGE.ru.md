@@ -172,6 +172,21 @@ dochive mirror \
   --save-assets images
 ```
 
+Для защищённых страниц Confluence Server/Data Center с Resolution API Token Authentication используйте изолированный Confluence source type. Bearer token читается из `.env` или process environment и также применяется для скачивания protected assets:
+
+```bash
+cp .env.example .env
+# отредактируйте .env и задайте DOCHIVE_AUTH_TOKEN
+dochive mirror \
+  --source "https://wiki.example.com/pages/viewpage.action?pageId=123" \
+  --out ./mirror \
+  --render-js \
+  --source-type confluence \
+  --auth bearer \
+  --scope subtree \
+  --save-assets images
+```
+
 ## Зеркалирование локального HTML
 
 Примеры ниже используют PowerShell line continuations. В Linux или macOS используйте те же options в одну строку или замените завершающие backticks на `\`.

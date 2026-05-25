@@ -103,3 +103,6 @@ class MirrorConfig:
     image_max_width: int | None = None
     anti_bot_mode: str = "basic"
     structure_mode: str = "auto"
+    source_type: str = "auto"
+    auth_mode: str = "none"
+    auth_token_env: str = "DOCHIVE_AUTH_TOKEN"
