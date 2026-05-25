@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 
+from .auth import request_headers, validate_auth_config
+from .confluence import confluence_body_html, confluence_links_and_assets, confluence_markdown
 from .html_extract import (
     extract_html_anchor_headings,
     extract_html_videos,
@@ -20,7 +22,14 @@ from .markdown_normalizer import normalize_markdown
 from .media_utils import extract_markdown_assets, merge_assets
 from .models import Asset, MirrorConfig, MirrorIssue, MirrorRun, Page, StructureEntry, StructureRun
 from .text_utils import repair_mojibake
-from .url_utils import HTML_SUFFIXES, canonicalize_url, canonicalize_with_language_prefix, extract_tocpath, same_domain
+from .url_utils import (
+    HTML_SUFFIXES,
+    canonicalize_confluence_url,
+    canonicalize_url,
+    canonicalize_with_language_prefix,
+    extract_tocpath,
+    same_domain,
+)
 
 MARKDOWN_BREADCRUMB_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)|([^>\n]+)")
 
@@ -40,6 +49,8 @@ class NavigationEntry:
 def crawl_web(config: MirrorConfig) -> MirrorRun:
     _configure_crawl4ai_environment(config)
     _validate_structure_mode(config.structure_mode)
+    _validate_source_type(config.source_type)
+    _validate_auth_config(config)
     try:
         import crawl4ai  # noqa: F401
     except ImportError as exc:
@@ -53,7 +64,9 @@ def crawl_web(config: MirrorConfig) -> MirrorRun:
 def build_web_structure(config: MirrorConfig) -> StructureRun:
     _configure_crawl4ai_environment(config)
     _validate_structure_mode(config.structure_mode)
-    if config.structure_mode != "links":
+    _validate_source_type(config.source_type)
+    _validate_auth_config(config)
+    if _uses_madcap_structure(config):
         run = discover_madcap_structure(config)
         if run.entries or config.structure_mode == "toc":
             if config.structure_mode == "toc" and run.issues:
@@ -86,25 +99,18 @@ async def _crawl_web_async(config: MirrorConfig) -> MirrorRun:
     _validate_anti_bot_mode(config.anti_bot_mode)
     _validate_structure_mode(config.structure_mode)
 
-    root_url = canonicalize_url(config.source)
+    root_url = _canonicalize_source_url(config.source, config)
     allowed_prefixes = _allowed_prefixes(root_url, config)
     root_fetch_url = config.source
     root_nav_path = extract_tocpath(config.source)
     issues: list[MirrorIssue] = []
 
-    browser_config_kwargs: dict[str, object] = {"headless": True}
-    run_config_kwargs: dict[str, object] = {}
-    if config.anti_bot_mode == "basic":
-        browser_config_kwargs["user_agent_mode"] = "random"
-        run_config_kwargs.update(
-            simulate_user=True,
-            override_navigator=True,
-            magic=True,
-        )
+    browser_config_kwargs = _browser_config_kwargs(config)
+    run_config_kwargs = _run_config_kwargs(config)
 
     browser_config = BrowserConfig(**browser_config_kwargs)
     run_config = CrawlerRunConfig(
-        css_selector=config.content_selector,
+        css_selector=_content_selector(config),
         excluded_selector=config.exclude_selector,
         excluded_tags=list(config.exclude_tags),
         remove_forms=True,
@@ -113,7 +119,7 @@ async def _crawl_web_async(config: MirrorConfig) -> MirrorRun:
     )
 
     async with AsyncWebCrawler(config=browser_config) as crawler:
-        if config.structure_mode != "links":
+        if _uses_madcap_structure(config):
             structure_run = discover_madcap_structure(config)
             if structure_run.entries:
                 pages, page_issues = await _fetch_pages_from_structure_entries(
@@ -162,24 +168,17 @@ async def _build_web_structure_async(config: MirrorConfig) -> StructureRun:
     _validate_anti_bot_mode(config.anti_bot_mode)
     _validate_structure_mode(config.structure_mode)
 
-    root_fetch_url = _structure_root_fetch_url(config.source)
-    root_url = canonicalize_url(root_fetch_url)
+    root_fetch_url = config.source if config.source_type == "confluence" else _structure_root_fetch_url(config.source)
+    root_url = _canonicalize_source_url(root_fetch_url, config)
     allowed_prefixes = _allowed_prefixes(root_url, config)
     root_nav_path = extract_tocpath(root_fetch_url)
 
-    browser_config_kwargs: dict[str, object] = {"headless": True}
-    run_config_kwargs: dict[str, object] = {}
-    if config.anti_bot_mode == "basic":
-        browser_config_kwargs["user_agent_mode"] = "random"
-        run_config_kwargs.update(
-            simulate_user=True,
-            override_navigator=True,
-            magic=True,
-        )
+    browser_config_kwargs = _browser_config_kwargs(config)
+    run_config_kwargs = _run_config_kwargs(config)
 
     browser_config = BrowserConfig(**browser_config_kwargs)
     run_config = CrawlerRunConfig(
-        css_selector=config.content_selector,
+        css_selector=_content_selector(config),
         excluded_selector=config.exclude_selector,
         excluded_tags=list(config.exclude_tags),
         remove_forms=True,
@@ -211,6 +210,34 @@ def _structure_root_fetch_url(source: str) -> str:
     root_parts = parts[: content_index + 1] + ["main_page.htm"]
     root_path = "/" + "/".join(root_parts)
     return parsed._replace(path=root_path, params="", query="", fragment="").geturl()
+
+
+def _browser_config_kwargs(config: MirrorConfig) -> dict[str, object]:
+    kwargs: dict[str, object] = {"headless": True}
+    headers = request_headers(config)
+    if headers:
+        kwargs["headers"] = headers
+    if config.anti_bot_mode == "basic":
+        kwargs["user_agent_mode"] = "random"
+    return kwargs
+
+
+def _run_config_kwargs(config: MirrorConfig) -> dict[str, object]:
+    if config.anti_bot_mode != "basic":
+        return {}
+    return {
+        "simulate_user": True,
+        "override_navigator": True,
+        "magic": True,
+    }
+
+
+def _content_selector(config: MirrorConfig) -> str | None:
+    if config.content_selector:
+        return config.content_selector
+    if config.source_type == "confluence":
+        return "#main-content .wiki-content, .wiki-content"
+    return None
 
 
 async def _build_navigation_index(
@@ -264,7 +291,7 @@ async def _build_navigation_index(
                 continue
             link_text = repair_mojibake(str(item.get("text") or item.get("title") or "")).strip()
             target_fetch_url = urljoin(entry.fetch_url, href)
-            target = _canonicalize_crawl_url(target_fetch_url, root_url)
+            target = _canonicalize_crawl_url(target_fetch_url, root_url, config)
             if target == url:
                 continue
             if target == root_url and url != root_url:
@@ -395,10 +422,17 @@ async def _fetch_pages_from_navigation_index(
         markdown_obj = getattr(result, "markdown", "")
         markdown = getattr(markdown_obj, "raw_markdown", None) or str(markdown_obj or "")
         html = getattr(result, "html", None) or getattr(result, "cleaned_html", "") or ""
+        links = getattr(result, "links", {}) or {}
+        media = getattr(result, "media", {}) or {}
+        if config.source_type == "confluence" and html:
+            html = confluence_body_html(html)
+            markdown = confluence_markdown(html, entry.fetch_url)
+            links, media = confluence_links_and_assets(html, entry.fetch_url)
         if html:
             markdown = promote_markdown_headings(markdown, html)
             markdown = inject_html_videos(markdown, html, entry.fetch_url)
-            markdown = inject_html_tables(markdown, html, entry.fetch_url)
+            if config.source_type != "confluence":
+                markdown = inject_html_tables(markdown, html, entry.fetch_url)
         anchor_headings = extract_html_anchor_headings(html) if html else {}
         markdown = normalize_markdown(
             markdown,
@@ -406,8 +440,6 @@ async def _fetch_pages_from_navigation_index(
             extra_noise_lines=config.noise_lines,
             anchor_headings=anchor_headings,
         )
-        links = getattr(result, "links", {}) or {}
-        media = getattr(result, "media", {}) or {}
         internal, external = _extract_page_links(links, entry.fetch_url, root_url, allowed_prefixes, config)
         assets = _extract_page_assets(media, html, markdown, entry.fetch_url)
 
@@ -462,10 +494,17 @@ async def _fetch_pages_from_structure_entries(
         markdown_obj = getattr(result, "markdown", "")
         markdown = getattr(markdown_obj, "raw_markdown", None) or str(markdown_obj or "")
         html = getattr(result, "html", None) or getattr(result, "cleaned_html", "") or ""
+        links = getattr(result, "links", {}) or {}
+        media = getattr(result, "media", {}) or {}
+        if config.source_type == "confluence" and html:
+            html = confluence_body_html(html)
+            markdown = confluence_markdown(html, entry.fetch_url)
+            links, media = confluence_links_and_assets(html, entry.fetch_url)
         if html:
             markdown = promote_markdown_headings(markdown, html)
             markdown = inject_html_videos(markdown, html, entry.fetch_url)
-            markdown = inject_html_tables(markdown, html, entry.fetch_url)
+            if config.source_type != "confluence":
+                markdown = inject_html_tables(markdown, html, entry.fetch_url)
         anchor_headings = extract_html_anchor_headings(html) if html else {}
         markdown = normalize_markdown(
             markdown,
@@ -473,8 +512,6 @@ async def _fetch_pages_from_structure_entries(
             extra_noise_lines=config.noise_lines,
             anchor_headings=anchor_headings,
         )
-        links = getattr(result, "links", {}) or {}
-        media = getattr(result, "media", {}) or {}
         internal, external = _extract_page_links(links, entry.fetch_url, root_url, allowed_prefixes, config)
         assets = _extract_page_assets(media, html, markdown, entry.fetch_url)
 
@@ -821,7 +858,7 @@ def _extract_page_links(
             continue
         if _is_service_or_placeholder_href(href):
             continue
-        target = _canonicalize_crawl_url(urljoin(fetch_url, href), root_url)
+        target = _canonicalize_crawl_url(urljoin(fetch_url, href), root_url, config)
         if _is_service_or_placeholder_url(target):
             continue
         if _is_allowed_url(target, root_url, allowed_prefixes, config):
@@ -918,6 +955,24 @@ def _validate_structure_mode(mode: str) -> None:
     raise RuntimeError(f"Unsupported structure mode: {mode}")
 
 
+def _validate_source_type(source_type: str) -> None:
+    if source_type in {"auto", "generic", "madcap", "wikijs", "confluence"}:
+        return
+    raise RuntimeError(f"Unsupported source type: {source_type}")
+
+
+def _validate_auth_config(config: MirrorConfig) -> None:
+    validate_auth_config(config)
+
+
+def _uses_madcap_structure(config: MirrorConfig) -> bool:
+    if config.source_type in {"confluence", "generic", "wikijs"}:
+        return False
+    if config.source_type == "madcap":
+        return True
+    return config.structure_mode != "links"
+
+
 def _unique(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
@@ -952,7 +1007,15 @@ def _is_allowed_url(target: str, root_url: str, allowed_prefixes: tuple[str, ...
     return any(target.startswith(prefix) for prefix in allowed_prefixes)
 
 
-def _canonicalize_crawl_url(url: str, root_url: str) -> str:
+def _canonicalize_source_url(url: str, config: MirrorConfig) -> str:
+    if config.source_type == "confluence":
+        return canonicalize_confluence_url(url)
+    return canonicalize_url(url)
+
+
+def _canonicalize_crawl_url(url: str, root_url: str, config: MirrorConfig | None = None) -> str:
+    if config and config.source_type == "confluence":
+        return canonicalize_confluence_url(url, root_url)
     return canonicalize_with_language_prefix(url, root_url)
 
 
