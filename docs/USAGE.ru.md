@@ -383,6 +383,8 @@ dochive mirror --source .\site-html --out .\mirror --no-clean-markdown
 
 Web crawler использует full HTML response для этого восстановления, потому что Crawl4AI `cleaned_html` может пропускать некоторые MadCap `h2 data-mc-autonum` headings. Local HTML parser также трактует `p` и `div` classes с именами `H1` through `H6` как Markdown headings.
 
+Если Crawl4AI полностью вырезает текст заголовка, Dochive всё равно может вставить заголовок перед следующим абзацем или первым пунктом списка из HTML, когда этот текст остаётся в Markdown.
+
 Специальный CLI flag не нужен. Если recovered headings не появляются после обычного запуска, сначала проверьте, что команда использует текущий код репозитория, например через `python -m dochive ...` из repo root.
 
 ## Проверка каталогов

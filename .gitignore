@@ -17,6 +17,7 @@ mirror/
 tmp*/
 /tests/*
 !/tests/test_crawl_limits.py
+!/tests/test_html_extract.py
 !/tests/test_url_utils.py
 main_page/
 .DS_Store

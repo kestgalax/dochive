@@ -12,6 +12,7 @@ Preserve the article hierarchy when documentation generators encode headings in 
 - Extract source headings from web HTML before Markdown cleanup.
 - Promote Markdown lines that exactly match source HTML headings.
 - Insert missing source HTML headings before nearby recovered content anchors when Crawl4AI omits the heading text from Markdown entirely.
+- Insert missing headings before the next source paragraph or list item when MadCap-style headings have no permalink anchors but the following block text is still present in Markdown.
 - Prefer the full Crawl4AI `html` field over `cleaned_html` for heading recovery because `cleaned_html` can omit MadCap `h2 data-mc-autonum` elements.
 - Compare heading and anchor text after mojibake repair so generated Markdown can still be fixed when Crawl4AI returns mojibake text before normal cleanup.
 
@@ -40,6 +41,6 @@ Preserve the article hierarchy when documentation generators encode headings in 
 
 ## Known Limitations
 
-Heading insertion is intentionally conservative. A heading is inserted only when it exists in source HTML and a nearby content anchor can be found in the generated Markdown. If an extractor removes both the heading and all nearby anchor text, the tool will not guess a location.
+Heading insertion is intentionally conservative. A heading is inserted only when it exists in source HTML and either a nearby content anchor or a matching snippet from the next paragraph or first list item can be found in the generated Markdown. If an extractor removes both the heading and all nearby anchor or follower text, the tool will not guess a location.
 
 The recovery logic handles class names that are exactly tokenized as `H1` through `H6`. Other site-specific heading class names should be added deliberately after inspecting the source HTML.

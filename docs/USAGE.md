@@ -383,6 +383,8 @@ Supported patterns include:
 
 The web crawler uses the full HTML response for this recovery because Crawl4AI `cleaned_html` can omit some MadCap `h2 data-mc-autonum` headings. The local HTML parser also treats `p` and `div` classes named `H1` through `H6` as Markdown headings.
 
+When Crawl4AI drops the heading text entirely, Dochive can still insert the heading before the next source paragraph or first list item when that follower text survives in Markdown.
+
 No special CLI flag is required. If recovered headings do not appear after a normal run, first verify that the command is using the current repository code, for example with `python -m dochive ...` from the repo root.
 
 ## Inspect Catalogs
