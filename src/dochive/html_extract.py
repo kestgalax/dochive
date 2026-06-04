@@ -15,6 +15,9 @@ from .url_utils import canonicalize_url, is_url
 _HEADING_CLASS_RE = re.compile(r"(?:^|\s)H([1-6])(?:\s|$)", re.IGNORECASE)
 _MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
 _MARKDOWN_HEADING_PARSE_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*\S)\s*$")
+_FOLLOWING_SNIPPET_LENGTH = 60
+_LIST_ITEM_PREFIX_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+")
+_MARKDOWN_LINK_TEXT_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 
 
 @dataclass
@@ -22,6 +25,7 @@ class HtmlHeading:
     level: int
     text: str
     anchors: list[str] = field(default_factory=list)
+    following_snippet: str = ""
 
 
 class HtmlDocumentParser(HTMLParser):
@@ -554,6 +558,9 @@ class _HtmlHeadingParser(HTMLParser):
         self.headings: list[HtmlHeading] = []
         self._skip_depth = 0
         self._active_heading: tuple[int, int, list[str], list[str]] | None = None
+        self._awaiting_following_index: int | None = None
+        self._following_tag: str | None = None
+        self._following_parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in {"script", "style", "noscript", "svg"}:
@@ -576,34 +583,79 @@ class _HtmlHeadingParser(HTMLParser):
             anchors: list[str] = []
             _append_anchor(anchors, attrs_map.get("id", ""))
             self._active_heading = (int(tag[1]), 1, [], anchors)
-        elif tag in {"p", "div"} and (level := _heading_level_from_class(attrs_map)):
+            self._clear_following_capture()
+            return
+        if tag in {"p", "div"} and (level := _heading_level_from_class(attrs_map)):
             anchors = []
             _append_anchor(anchors, attrs_map.get("id", ""))
             self._active_heading = (level, 1, [], anchors)
+            self._clear_following_capture()
+            return
+
+        self._maybe_start_following_capture(tag, attrs_map)
 
     def handle_endtag(self, tag: str) -> None:
         if tag in {"script", "style", "noscript", "svg"} and self._skip_depth:
             self._skip_depth -= 1
             return
-        if self._skip_depth or self._active_heading is None:
+        if self._skip_depth:
             return
 
-        level, depth, parts, anchors = self._active_heading
-        depth -= 1
-        if depth:
-            self._active_heading = (level, depth, parts, anchors)
+        if self._active_heading is not None:
+            level, depth, parts, anchors = self._active_heading
+            depth -= 1
+            if depth:
+                self._active_heading = (level, depth, parts, anchors)
+                return
+
+            text = _normalize_heading_text("".join(parts))
+            if text:
+                self.headings.append(HtmlHeading(level=level, text=text, anchors=anchors))
+                self._awaiting_following_index = len(self.headings) - 1
+            self._active_heading = None
             return
 
-        text = _normalize_heading_text("".join(parts))
-        if text:
-            self.headings.append(HtmlHeading(level=level, text=text, anchors=anchors))
-        self._active_heading = None
+        self._maybe_finish_following_capture(tag)
 
     def handle_data(self, data: str) -> None:
         if self._skip_depth:
             return
         if self._active_heading is not None:
             self._active_heading[2].append(data)
+            return
+        if self._following_tag is not None:
+            self._following_parts.append(data)
+
+    def _clear_following_capture(self) -> None:
+        self._following_tag = None
+        self._following_parts = []
+
+    def _maybe_start_following_capture(self, tag: str, attrs_map: dict[str, str]) -> None:
+        if self._awaiting_following_index is None or self._following_tag is not None:
+            return
+        if tag == "p" and not _heading_level_from_class(attrs_map):
+            self._following_tag = "p"
+            self._following_parts = []
+        elif tag in {"ul", "ol"}:
+            self._following_tag = "list"
+            self._following_parts = []
+        elif tag == "li" and self._following_tag == "list":
+            self._following_tag = "li"
+            self._following_parts = []
+
+    def _maybe_finish_following_capture(self, tag: str) -> None:
+        if self._following_tag is None:
+            return
+        if tag not in {self._following_tag, "ul", "ol"}:
+            return
+        if self._following_tag == "list" and tag not in {"li", "ul", "ol"}:
+            return
+
+        text = _normalize_heading_text("".join(self._following_parts))
+        if text and self._awaiting_following_index is not None:
+            self.headings[self._awaiting_following_index].following_snippet = _make_following_snippet(text)
+            self._awaiting_following_index = None
+        self._clear_following_capture()
 
     def handle_entityref(self, name: str) -> None:
         self.handle_data(unescape(f"&{name};"))
@@ -737,6 +789,12 @@ def _heading_insertion_match(lines: list[str], heading: HtmlHeading, start_index
         for index, line in enumerate(lines[start_index:], start=start_index):
             if _line_contains_anchor(line, normalized_anchor):
                 return _previous_block_start(lines, index), index
+
+    snippet = _normalize_following_snippet(heading.following_snippet)
+    if snippet:
+        for index, line in enumerate(lines[start_index:], start=start_index):
+            if _line_matches_following_snippet(line, snippet):
+                return _previous_block_start(lines, index), index
     return None
 
 
@@ -757,12 +815,55 @@ def _line_contains_anchor(line: str, anchor: str) -> bool:
     return anchor in normalized_line
 
 
+def _is_markdown_media_line(line: str) -> bool:
+    stripped = line.strip().lower()
+    return stripped.startswith(("<image ", "<video "))
+
+
 def _previous_block_start(lines: list[str], index: int) -> int:
-    return index
+    insertion = index
+    cursor = index - 1
+    while cursor >= 0 and not lines[cursor].strip():
+        cursor -= 1
+    if cursor < 0 or not _is_markdown_media_line(lines[cursor]):
+        return insertion
+
+    while cursor >= 0:
+        if _is_markdown_media_line(lines[cursor]):
+            insertion = cursor
+            cursor -= 1
+            continue
+        if not lines[cursor].strip():
+            cursor -= 1
+            continue
+        break
+    return insertion
 
 
 def _normalize_heading_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _make_following_snippet(text: str) -> str:
+    normalized = _normalize_following_snippet(text)
+    if len(normalized) <= _FOLLOWING_SNIPPET_LENGTH:
+        return normalized
+    return normalized[:_FOLLOWING_SNIPPET_LENGTH].rsplit(" ", 1)[0] or normalized[:_FOLLOWING_SNIPPET_LENGTH]
+
+
+def _normalize_following_snippet(text: str) -> str:
+    return _normalize_heading_text(repair_mojibake(text))
+
+
+def _line_matches_following_snippet(line: str, snippet: str) -> bool:
+    if not snippet:
+        return False
+    stripped = _LIST_ITEM_PREFIX_RE.sub("", line.strip())
+    plain = _MARKDOWN_LINK_TEXT_RE.sub(r"\1", stripped)
+    normalized = _normalize_following_snippet(plain)
+    if not normalized:
+        return False
+    return snippet in normalized or normalized.startswith(snippet)
 
 
 def _can_promote_markdown_line(stripped: str) -> bool:

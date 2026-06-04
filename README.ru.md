@@ -20,8 +20,8 @@ Dochive — инструмент общего назначения, но у не
 - Читает навигацию MadCap WebHelp из `Data/HelpSystem.xml`, когда она доступна, вместо опоры только на ссылки страниц.
 - Обрабатывает Wiki.js-style extensionless URLs, language prefixes, service links, permalink heading anchors и повторяющийся site chrome.
 - Скачивает или копирует изображения в page-local media folders; HTML video sources также можно локализовать через `--save-assets videos`.
-- Рендерит изображения как Gramax `<image .../>` tags с intrinsic sizes или ограниченной шириной.
-- Восстанавливает заголовки из HTML-паттернов стилей, например `p class="H4"` и MadCap `h2 data-mc-autonum`.
+- Рендерит изображения как Gramax `<image .../>` tags с intrinsic sizes или ограниченной шириной; мелкие иконки в списках остаются inline.
+- Восстанавливает заголовки из HTML-паттернов стилей, например `p class="H4"` и MadCap `h2 data-mc-autonum`, в том числе вставляет их перед следующим абзацем или пунктом списка, если Crawl4AI вырезал текст заголовка.
 - Очищает типичный шум документации, включая повторяющийся page chrome, выбранные tags, selectors и точные noisy lines.
 - Записывает каталоги и отчёты по страницам, ссылкам, assets, структуре, ошибкам и incremental sync.
 - Предоставляет lexical search и Git publish helpers для mirrored repositories.

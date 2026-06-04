@@ -291,6 +291,8 @@ By default, linked screenshots are written in Gramax image form:
 
 The default `--image-size-mode intrinsic` reads the real downloaded image dimensions and writes them into the Gramax image tag. Saved media is stored next to the Markdown page: regular `version_35.md` pages use `version_35/`, while Gramax head pages use the same folder as `version_35/_index.md`.
 
+By default, images at or below `--image-inline-max-px 48` (for example MadCap list icons) stay inline inside list items with `float="left"` instead of centered block `<image>` tags that Gramax would upscale.
+
 For wide screenshots, cap rendered width while preserving aspect ratio:
 
 ```powershell
@@ -382,6 +384,8 @@ Supported patterns include:
 ```
 
 The web crawler uses the full HTML response for this recovery because Crawl4AI `cleaned_html` can omit some MadCap `h2 data-mc-autonum` headings. The local HTML parser also treats `p` and `div` classes named `H1` through `H6` as Markdown headings.
+
+When Crawl4AI drops the heading text entirely, Dochive can still insert the heading before the next source paragraph or first list item when that follower text survives in Markdown.
 
 No special CLI flag is required. If recovered headings do not appear after a normal run, first verify that the command is using the current repository code, for example with `python -m dochive ...` from the repo root.
 

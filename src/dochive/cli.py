@@ -113,6 +113,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mirror.add_argument("--image-max-width", type=int, help="Maximum rendered width in pixels for --image-size-mode max-width.")
     mirror.add_argument(
+        "--image-inline-max-px",
+        type=int,
+        default=48,
+        help="Keep images at or below this size inline (for list icons). Use 0 to disable.",
+    )
+    mirror.add_argument(
         "--anti-bot",
         choices=("off", "basic", "stealth", "aggressive"),
         default="basic",
@@ -285,6 +291,7 @@ def _mirror_config_from_args(args: argparse.Namespace) -> MirrorConfig:
         image_render_mode=args.image_render_mode,
         image_size_mode=args.image_size_mode,
         image_max_width=args.image_max_width,
+        image_inline_max_px=args.image_inline_max_px or None,
         anti_bot_mode=args.anti_bot,
         structure_mode=args.structure_mode,
         source_type=args.source_type,

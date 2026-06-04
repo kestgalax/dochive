@@ -291,6 +291,8 @@ dochive mirror `
 
 Default `--image-size-mode intrinsic` читает реальные downloaded image dimensions и записывает их в Gramax image tag. Saved media хранится рядом с Markdown page: обычные `version_35.md` pages используют `version_35/`, а Gramax head pages используют ту же папку, что и `version_35/_index.md`.
 
+По умолчанию изображения не больше `--image-inline-max-px 48` (например иконки MadCap в списках) остаются inline внутри пункта списка с `float="left"`, а не превращаются в блочные `<image float="center">`, которые Gramax растягивает.
+
 Для wide screenshots ограничьте rendered width с сохранением aspect ratio:
 
 ```powershell
@@ -382,6 +384,8 @@ dochive mirror --source .\site-html --out .\mirror --no-clean-markdown
 ```
 
 Web crawler использует full HTML response для этого восстановления, потому что Crawl4AI `cleaned_html` может пропускать некоторые MadCap `h2 data-mc-autonum` headings. Local HTML parser также трактует `p` и `div` classes с именами `H1` through `H6` как Markdown headings.
+
+Если Crawl4AI полностью вырезает текст заголовка, Dochive всё равно может вставить заголовок перед следующим абзацем или первым пунктом списка из HTML, когда этот текст остаётся в Markdown.
 
 Специальный CLI flag не нужен. Если recovered headings не появляются после обычного запуска, сначала проверьте, что команда использует текущий код репозитория, например через `python -m dochive ...` из repo root.
 
