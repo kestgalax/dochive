@@ -4,6 +4,25 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] — 2026-06-04
+
+Branch `fix/madcap-tables-comments-colwidth`: MadCap table recovery, Gramax notes, and page titles from HTML.
+
+### Added
+
+- Convert source HTML tables into Gramax `{% table %}` blocks with per-cell `{% colwidth=[…] %}` (256 px default, 512 px for wide columns); keep `rowspan`/`colspan` tables as HTML fallback.
+- Replace lossy Crawl4AI pipe tables with cleaned HTML tables; absorb orphan list bullets that belonged inside table cells.
+- Map MadCap `<p class="comment">` paragraphs to Gramax `:::note:true` callouts during web mirror.
+- Insert MadCap `<h2>` section titles immediately before each recovered Gramax table block.
+- Use the HTML `<title>` or `<h1>` text for mirrored page metadata when Crawl4AI or navigation labels are shorter than the document title.
+
+### Fixed
+
+- Duplicate `##` section headings between consecutive Gramax tables when heading promotion and table injection overlapped.
+- Leftover pipe rows, loose `|`, and orphan bullets after `{% /table %}` on MadCap metric pages.
+- Stray `-` lines inside table cells when list items used nested `<p>` markup (`<ul class="tab">` in cells).
+- Gramax page header showing a short TOC label while the article body kept the full MadCap document title.
+
 ## [0.2.0] — 2026-06-04
 
 Branch `codex/madcap-heading-recovery`: MadCap WebHelp heading recovery and Gramax-safe list icons.

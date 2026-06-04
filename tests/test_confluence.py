@@ -280,7 +280,8 @@ def test_generic_table_injection_still_uses_html_tables() -> None:
 
     result = inject_html_tables(markdown, html, "https://example.com/docs")
 
-    assert '<table header="row">' in result
+    assert '{% table header="row" %}' in result
+    assert "{% /table %}" in result
     assert "| A | B |" not in result
 
 

@@ -18,6 +18,18 @@ _MARKDOWN_HEADING_PARSE_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*\S)\s*$")
 _FOLLOWING_SNIPPET_LENGTH = 60
 _LIST_ITEM_PREFIX_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+")
 _MARKDOWN_LINK_TEXT_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_ORPHAN_TABLE_BULLET_RE = re.compile(r"^\s*[-*+]\s+\S")
+_COLWIDTH_DEFAULT = 256
+_COLWIDTH_WIDE = 512
+_COLWIDTH_WIDE_LEN_THRESHOLD = 80
+
+
+@dataclass
+class _TableCell:
+    text: str
+    tag: str = "td"
+    rowspan: str = ""
+    colspan: str = ""
 
 
 @dataclass
@@ -215,8 +227,10 @@ def inject_html_tables(markdown: str, html: str, base_url: str) -> str:
     table_index = 0
     while index < len(lines):
         if table_index < len(tables) and _looks_like_markdown_table_start(lines, index):
+            block_start = _markdown_table_block_start(lines, index)
             end = _markdown_table_block_end(lines, index)
             if end > index:
+                _drop_emitted_lines(output, index - block_start)
                 if output and output[-1].strip():
                     output.append("")
                 output.append(tables[table_index])
@@ -231,6 +245,148 @@ def inject_html_tables(markdown: str, html: str, base_url: str) -> str:
 
     if table_index == 0:
         return markdown
+    result = "\n".join(output).strip() + "\n"
+    result = _cleanup_madcap_table_duplicates(result)
+    result = inject_html_table_section_headings(result, html)
+    result = _strip_orphan_headings_between_gramax_tables(result)
+    return _dedupe_adjacent_markdown_headings(result)
+
+
+def extract_html_document_title(html: str) -> str:
+    """Prefer the HTML document title over short crawl/nav labels for page metadata."""
+
+    for pattern in (
+        r"<title[^>]*>([^<]+)</title>",
+        r"<h1\b[^>]*>(.*?)</h1>",
+    ):
+        match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        text = repair_mojibake(unescape(re.sub(r"<[^>]+>", "", match.group(1)))).strip()
+        if text:
+            return text
+    return ""
+
+
+def inject_html_table_section_headings(markdown: str, html: str) -> str:
+    """Insert MadCap <h2> section titles immediately before Gramax table blocks."""
+
+    headings = _extract_h2_headings_for_html_tables(html)
+    if not headings:
+        return markdown
+
+    lines = markdown.splitlines()
+    output: list[str] = []
+    heading_index = 0
+    for line in lines:
+        if line.strip().startswith('{% table header="row" %}') and heading_index < len(headings):
+            heading = headings[heading_index]
+            heading_index += 1
+            if heading:
+                if output and output[-1].strip():
+                    output.append("")
+                if not (output and output[-1].strip() == heading):
+                    output.append(heading)
+                    output.append("")
+        output.append(line)
+    return "\n".join(output).strip() + "\n"
+
+
+def _extract_h2_headings_for_html_tables(html: str) -> list[str]:
+    pending: str | None = None
+    headings: list[str] = []
+    for match in re.finditer(r"<h2\b[^>]*>.*?</h2>|<table\b", html, re.IGNORECASE | re.DOTALL):
+        chunk = match.group(0)
+        if chunk.lower().startswith("<h2"):
+            text = repair_mojibake(unescape(re.sub(r"<[^>]+>", "", chunk))).strip()
+            pending = f"## {text}" if text else None
+            continue
+        if pending:
+            headings.append(pending)
+            pending = None
+        else:
+            headings.append("")
+    return headings
+
+
+def _strip_orphan_headings_between_gramax_tables(markdown: str) -> str:
+    """Remove duplicate MadCap h2 lines between Gramax tables (Crawl4AI + inject overlap)."""
+
+    lines = markdown.splitlines()
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        output.append(lines[index])
+        if lines[index].strip() != "{% /table %}":
+            index += 1
+            continue
+        index += 1
+        gap: list[str] = []
+        while index < len(lines) and not lines[index].strip().startswith('{% table header="row" %}'):
+            gap.append(lines[index])
+            index += 1
+        prose_lines = [
+            line
+            for line in gap
+            if line.strip()
+            and not _MARKDOWN_HEADING_RE.match(line)
+            and not _is_table_debris_line(line)
+        ]
+        heading_lines = [line for line in gap if _MARKDOWN_HEADING_RE.match(line)]
+        if prose_lines:
+            output.extend(gap)
+            continue
+        if heading_lines:
+            if output and output[-1].strip():
+                output.append("")
+            output.append(heading_lines[-1])
+            continue
+        output.extend(gap)
+    return "\n".join(output).strip() + "\n"
+
+
+def _dedupe_adjacent_markdown_headings(markdown: str) -> str:
+    output: list[str] = []
+    previous_heading: str | None = None
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if match := _MARKDOWN_HEADING_PARSE_RE.match(line):
+            hashes = line.lstrip()[: line.lstrip().find(" ")]
+            normalized = _normalize_heading_text(repair_mojibake(match.group(1)))
+            heading_key = f"{len(hashes)}:{normalized}"
+            if heading_key == previous_heading:
+                continue
+            previous_heading = heading_key
+            output.append(line)
+            continue
+        if stripped:
+            previous_heading = None
+        output.append(line)
+    return "\n".join(output).strip() + "\n"
+
+
+def inject_html_comments(markdown: str, html: str) -> str:
+    """Convert MadCap <p class=\"comment\"> blocks into Gramax note callouts."""
+
+    comments = extract_html_comments(html)
+    if not comments:
+        return markdown
+
+    output: list[str] = []
+    for line in markdown.splitlines():
+        if line.strip().startswith(":::"):
+            output.append(line)
+            continue
+        replaced = False
+        for comment in comments:
+            if _line_matches_comment_text(line, comment):
+                output.append(":::note:true")
+                output.append(comment)
+                output.append(":::")
+                replaced = True
+                break
+        if not replaced:
+            output.append(line)
     return "\n".join(output).strip() + "\n"
 
 
@@ -244,45 +400,107 @@ def extract_html_tables(html: str, base_url: str) -> list[str]:
 
 
 def _sanitize_html_table(html: str, base_url: str) -> str:
-    parser = _HtmlTableSanitizer(base_url)
+    parser = _HtmlTableParser(base_url)
     parser.feed(html)
     parser.close()
-    rendered = "".join(parser.output).strip()
-    if rendered.lower().startswith("<table") and rendered.lower().endswith("</table>"):
-        result = rendered.replace("<table>", '<table header="row">', 1)
-        result = re.sub(r"</tbody>\s*", "", result, flags=re.IGNORECASE)
-        result = re.sub(r"<tbody[^>]*>\s*", "", result, flags=re.IGNORECASE)
-        return result
-    return ""
+    if not parser.rows:
+        return ""
+    if parser.has_complex_spans:
+        return _render_html_table(parser.rows)
+    return _render_gramax_table(parser.rows)
+
+
+def extract_html_comments(html: str) -> list[str]:
+    parser = _HtmlCommentParser()
+    parser.feed(html)
+    parser.close()
+    return parser.comments
 
 
 def _looks_like_markdown_table_start(lines: list[str], index: int) -> bool:
     stripped = lines[index].strip()
-    if not stripped.startswith("|"):
+    if not stripped.startswith("|") and not _is_loose_table_line(lines[index]):
         return False
     window = lines[index : min(len(lines), index + 8)]
-    return any(re.match(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$", line) for line in window)
+    if any(re.match(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$", line) for line in window):
+        return True
+    if _is_pipe_table_row(stripped) or _is_loose_table_line(lines[index]):
+        return True
+    return _madcap_table_region_ahead(lines, index)
+
+
+def _madcap_table_region_ahead(lines: list[str], index: int) -> bool:
+    for candidate in lines[index : min(len(lines), index + 24)]:
+        if _is_pipe_table_row(candidate.strip()) or re.match(
+            r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$",
+            candidate,
+        ):
+            return True
+        if candidate.strip() and re.match(r"^#{1,2}\s+", candidate.strip()):
+            return False
+        if candidate.strip() and not _is_table_debris_line(candidate):
+            return False
+    return False
+
+
+def _drop_emitted_lines(output: list[str], count: int) -> None:
+    while count > 0 and output:
+        output.pop()
+        count -= 1
+
+
+def _markdown_table_block_start(lines: list[str], table_start: int) -> int:
+    start = table_start
+    while start > 0:
+        previous = lines[start - 1]
+        if not previous.strip():
+            start -= 1
+            continue
+        if re.match(r"^#{1,2}\s+", previous.strip()):
+            break
+        if _is_table_debris_line(previous):
+            start -= 1
+            continue
+        break
+    return start
 
 
 def _markdown_table_block_end(lines: list[str], start: int) -> int:
     index = start
-    seen_separator = False
     while index < len(lines):
         stripped = lines[index].strip()
+        if index > start and re.match(r"^##\s+", stripped):
+            break
         if index > start and _is_markdown_table_boundary(stripped):
             break
-        if re.match(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$", lines[index]):
-            seen_separator = True
-        if (
-            index > start
-            and seen_separator
-            and stripped
-            and not _is_markdown_table_continuation(lines[index])
-            and _is_after_regular_markdown_table(lines, index)
-        ):
+        if index > start and stripped and not _is_madcap_table_zone_line(lines[index]):
             break
         index += 1
     return index
+
+
+def _is_madcap_table_zone_line(line: str) -> bool:
+    if _is_table_debris_line(line):
+        return True
+    stripped = line.strip()
+    if not stripped:
+        return True
+    if _LIST_ITEM_PREFIX_RE.match(stripped):
+        return True
+    if re.match(r"^\*\*.+\*\*$", stripped):
+        return True
+    return line.startswith((" ", "\t"))
+
+
+def _is_plain_text_between_table_blocks(lines: list[str], index: int) -> bool:
+    stripped = lines[index].strip()
+    if not stripped or stripped.startswith("|") or _MARKDOWN_HEADING_RE.match(stripped):
+        return False
+    if _ORPHAN_TABLE_BULLET_RE.match(stripped) or _LIST_ITEM_PREFIX_RE.match(stripped):
+        return False
+    previous = lines[index - 1].strip() if index else ""
+    next_line = lines[index + 1].strip() if index + 1 < len(lines) else ""
+    return previous.startswith("|") and next_line.startswith("|")
 
 
 def _is_after_regular_markdown_table(lines: list[str], index: int) -> bool:
@@ -299,7 +517,8 @@ def _is_markdown_table_boundary(stripped: str) -> bool:
     return bool(
         _MARKDOWN_HEADING_RE.match(stripped)
         or stripped.startswith(("---", "***", "<image ", "<video ", "!["))
-        or stripped in {"</table>", "<table>"}
+        or stripped in {"</table>", "<table>", "{% /table %}"}
+        or stripped.startswith("{% table")
     )
 
 
@@ -313,6 +532,180 @@ def _is_markdown_table_continuation(line: str) -> bool:
         or stripped.startswith(("- ", "* ", "+ "))
         or bool(re.match(r"^\d+\.\s+", stripped))
     )
+
+
+def _is_orphan_table_bullet_line(line: str) -> bool:
+    return bool(_ORPHAN_TABLE_BULLET_RE.match(line))
+
+
+def _is_pipe_table_row(stripped: str) -> bool:
+    return stripped.startswith("|") and stripped.count("|") >= 2
+
+
+def _is_loose_table_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped in {"|", "| |"} or bool(re.match(r"^\|\s+\|", stripped))
+
+
+def _is_table_debris_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if _is_orphan_table_bullet_line(line):
+        return True
+    if _is_loose_table_line(line):
+        return True
+    if stripped.startswith("|"):
+        return True
+    return _is_pipe_table_row(stripped)
+
+
+def _cleanup_madcap_table_duplicates(markdown: str) -> str:
+    """Drop Crawl4AI table fragments that duplicate a preceding Gramax table."""
+
+    lines = markdown.splitlines()
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.strip() != "{% /table %}":
+            output.append(line)
+            index += 1
+            continue
+        output.append(line)
+        index += 1
+        while index < len(lines) and not lines[index].strip():
+            index += 1
+        if index < len(lines) and re.match(r"^##\s+", lines[index].strip()):
+            body_start = index + 1
+            debris_end, found_debris = _leading_madcap_table_debris(lines, body_start)
+            if found_debris:
+                index = debris_end
+                continue
+            output.append("")
+            output.append(lines[index])
+            index += 1
+            index = _skip_madcap_table_debris(lines, index)
+            continue
+        index = _skip_madcap_table_debris(lines, index)
+    return "\n".join(output).strip() + "\n"
+
+
+def _leading_madcap_table_debris(lines: list[str], start: int) -> tuple[int, bool]:
+    """Skip blank lines, then consecutive table-debris lines; stop at real content."""
+
+    index = start
+    found_debris = False
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if not stripped:
+            index += 1
+            continue
+        if _is_markdown_table_boundary(stripped):
+            break
+        if _is_table_debris_line(lines[index]):
+            found_debris = True
+            index += 1
+            continue
+        break
+    return index, found_debris
+
+
+def _skip_madcap_table_debris(lines: list[str], start: int) -> int:
+    index = start
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if not stripped:
+            index += 1
+            continue
+        if _is_markdown_table_boundary(stripped):
+            break
+        if _is_table_debris_line(lines[index]):
+            index += 1
+            continue
+        break
+    return index
+
+
+def _column_colwidths(rows: list[list[_TableCell]]) -> list[int]:
+    """Gramax applies colwidth per column; use the widest cell in each column."""
+
+    if not rows:
+        return []
+    num_cols = max(len(row) for row in rows)
+    max_lens = [0] * num_cols
+    for row in rows:
+        for index, cell in enumerate(row):
+            if index < num_cols:
+                max_lens[index] = max(max_lens[index], len(cell.text.strip()))
+    return [
+        _COLWIDTH_WIDE if length >= _COLWIDTH_WIDE_LEN_THRESHOLD else _COLWIDTH_DEFAULT
+        for length in max_lens
+    ]
+
+
+def _gramax_colwidth_directive(width: int) -> str:
+    return f"{{% colwidth=[{width}] %}}"
+
+
+def _render_gramax_table(rows: list[list[_TableCell]]) -> str:
+    if not rows:
+        return ""
+
+    column_widths = _column_colwidths(rows)
+    parts = ['{% table header="row" %}', ""]
+    for row in rows:
+        parts.append("---")
+        parts.append("")
+        for index, cell in enumerate(row):
+            width = column_widths[index] if index < len(column_widths) else _COLWIDTH_DEFAULT
+            parts.append(f"*  {_gramax_colwidth_directive(width)}")
+            content = cell.text.strip()
+            if not content:
+                parts.append("   ")
+            else:
+                for line in content.splitlines():
+                    parts.append(f"   {line}")
+        parts.append("")
+    parts.append("{% /table %}")
+    return "\n".join(parts).strip() + "\n"
+
+
+def _render_html_table(rows: list[list[_TableCell]]) -> str:
+    parts = ['<table header="row">']
+    for row in rows:
+        parts.append("\n<tr>\n")
+        for cell in row:
+            attrs: list[str] = []
+            if cell.rowspan:
+                attrs.append(f'rowspan="{escape(cell.rowspan, quote=True)}"')
+            if cell.colspan:
+                attrs.append(f'colspan="{escape(cell.colspan, quote=True)}"')
+            attr_str = (" " + " ".join(attrs)) if attrs else ""
+            parts.append(f"\n<{cell.tag}{attr_str}>\n\n")
+            if cell.text.strip():
+                parts.append(cell.text.strip())
+                parts.append("\n\n")
+            parts.append(f"</{cell.tag}>")
+        parts.append("\n</tr>\n")
+    parts.append("\n</table>")
+    return "".join(parts).strip() + "\n"
+
+
+def _line_matches_comment_text(line: str, comment: str) -> bool:
+    normalized_line = _normalize_comment_text(line)
+    return bool(normalized_line and normalized_line == comment)
+
+
+def _normalize_comment_text(text: str) -> str:
+    stripped = repair_mojibake(text).replace("\xa0", " ").strip()
+    stripped = re.sub(r"^\s*[-*+]\s+", "", stripped)
+    stripped = re.sub(r"^\s*>\s+", "", stripped)
+    if stripped.startswith("*") and stripped.endswith("*") and len(stripped) > 2:
+        stripped = stripped[1:-1].strip()
+    if stripped.startswith("_") and stripped.endswith("_") and len(stripped) > 2:
+        stripped = stripped[1:-1].strip()
+    return re.sub(r"\s+", " ", stripped).strip()
 
 
 def extract_html_videos(html: str, base_url: str) -> list[list[str]]:
@@ -364,18 +757,24 @@ class _HtmlVideoParser(HTMLParser):
             self._sources = []
 
 
-class _HtmlTableSanitizer(HTMLParser):
+class _HtmlTableParser(HTMLParser):
     _INLINE_TAGS = {"strong", "b", "em", "i", "code"}
-    _BLOCK_TAGS = {"table", "thead", "tbody", "tfoot", "tr", "th", "td", "ul", "ol", "li", "p"}
-    _PRESERVE_ATTRS = {"rowspan", "colspan"}
 
     def __init__(self, base_url: str) -> None:
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
-        self.output: list[str] = []
+        self.rows: list[list[_TableCell]] = []
+        self.column_max_lens: list[int] = []
+        self.has_complex_spans = False
         self._skip_depth = 0
-        self._in_td = False
-        self._in_list: str | None = None
+        self._current_row: list[_TableCell] = []
+        self._in_cell = False
+        self._cell_tag = "td"
+        self._cell_rowspan = ""
+        self._cell_colspan = ""
+        self._col_index = 0
+        self._cell_parts: list[str] = []
+        self._in_li = False
         self._link_text: list[str] = []
         self._link_href: str | None = None
 
@@ -393,46 +792,35 @@ class _HtmlTableSanitizer(HTMLParser):
                 self._link_href = urljoin(self.base_url, href)
                 self._link_text = []
             return
-        if tag == "br":
-            if self._in_td:
-                self.output.append("\n")
+        if tag == "br" and self._in_cell:
+            self._cell_parts.append("\n")
             return
-        if tag in self._INLINE_TAGS:
-            if self._in_td:
-                self.output.append("**" if tag in {"strong", "b"} else "*")
-            else:
-                self.output.append(f"<{tag}>")
+        if tag in self._INLINE_TAGS and self._in_cell:
+            self._cell_parts.append("**" if tag in {"strong", "b"} else ("`" if tag == "code" else "*"))
             return
-        if tag in self._BLOCK_TAGS:
-            if tag == "td":
-                self._in_td = True
-                self._in_list = None
-                attrs_str = self._render_attrs(attrs_map)
-                self.output.append(f"\n<td{attrs_str}>\n\n")
+        if tag == "tr":
+            self._flush_row()
+            self._col_index = 0
+            return
+        if tag in {"td", "th"}:
+            self._finish_cell()
+            self._in_cell = True
+            self._cell_tag = tag
+            self._cell_parts = []
+            rowspan = attrs_map.get("rowspan", "").strip()
+            colspan = attrs_map.get("colspan", "").strip()
+            self._cell_rowspan = rowspan if rowspan.isdigit() else ""
+            self._cell_colspan = colspan if colspan.isdigit() else ""
+            if self._cell_rowspan or self._cell_colspan:
+                self.has_complex_spans = True
+            return
+        if self._in_cell:
+            if tag == "li":
+                self._in_li = True
+                self._cell_parts.append("\n- ")
                 return
-            if tag == "tr":
-                self.output.append("\n<tr>\n")
+            if tag == "p" and self._in_li:
                 return
-            if self._in_td:
-                if tag == "ul":
-                    self._in_list = "ul"
-                    self.output.append("\n")
-                    return
-                if tag == "ol":
-                    self._in_list = "ol"
-                    self.output.append("\n")
-                    return
-                if tag == "li":
-                    marker = "-  " if self._in_list == "ul" else f"{self._td_list_index()}.  "
-                    self.output.append(f"\n{marker}")
-                    return
-                if tag == "p":
-                    self.output.append("\n")
-                    return
-                self.output.append(f"\n")
-                return
-            self._append_newline()
-            self.output.append(f"<{tag}{self._render_attrs(attrs_map)}>")
 
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
@@ -443,44 +831,25 @@ class _HtmlTableSanitizer(HTMLParser):
             return
         if tag == "a" and self._link_href:
             text = "".join(self._link_text).strip() or self._link_href
-            self.output.append(f"[{text}]({self._link_href})")
+            self._cell_parts.append(f"[{text}]({self._link_href})")
             self._link_href = None
             self._link_text = []
             return
-        if tag == "br":
-            pass
-        elif tag in self._INLINE_TAGS:
-            if self._in_td:
-                self.output.append("**" if tag in {"strong", "b"} else "*")
-            else:
-                self.output.append(f"</{tag}>")
-        elif tag in self._BLOCK_TAGS:
-            if tag == "td":
-                self._in_td = False
-                self._in_list = None
-                self.output.append("\n\n</td>")
-            elif tag == "tr":
-                self.output.append("\n</tr>\n")
-            elif tag == "table":
-                self.output.append("\n</table>")
-            elif self._in_td:
-                if tag in {"ul", "ol"}:
-                    self._in_list = None
-                    self.output.append("\n")
-                elif tag == "p":
-                    pass
-                else:
-                    self.output.append("\n")
-            else:
-                self.output.append(f"</{tag}>")
-                self._append_newline()
-
-    def _td_list_index(self) -> int:
-        count = 0
-        for item in self.output:
-            if item.startswith("\n") and ". " in item:
-                count += 1
-        return count + 1
+        if tag in self._INLINE_TAGS and self._in_cell:
+            self._cell_parts.append("**" if tag in {"strong", "b"} else ("`" if tag == "code" else "*"))
+            return
+        if tag == "li" and self._in_cell:
+            self._in_li = False
+            return
+        if tag in {"td", "th"}:
+            self._finish_cell()
+            return
+        if tag == "tr":
+            self._flush_row()
+            return
+        if tag == "table":
+            self._finish_cell()
+            self._flush_row()
 
     def handle_data(self, data: str) -> None:
         if self._skip_depth:
@@ -488,24 +857,90 @@ class _HtmlTableSanitizer(HTMLParser):
         if self._link_href is not None:
             self._link_text.append(data)
             return
-        if self._in_td:
-            self.output.append(data)
-        else:
-            text = re.sub(r"\s+", " ", data.replace("\xa0", " ")).strip()
-            if text:
-                self.output.append(escape(text))
+        if self._in_cell:
+            self._cell_parts.append(data)
 
-    def _render_attrs(self, attrs_map: dict[str, str]) -> str:
-        output: list[str] = []
-        for name in sorted(self._PRESERVE_ATTRS):
-            value = attrs_map.get(name, "").strip()
-            if value and value.isdigit():
-                output.append(f'{name}="{escape(value, quote=True)}"')
-        return (" " + " ".join(output)) if output else ""
+    def _finish_cell(self) -> None:
+        if not self._in_cell:
+            return
+        text = _normalize_table_cell_text("".join(self._cell_parts))
+        while len(self.column_max_lens) <= self._col_index:
+            self.column_max_lens.append(0)
+        if text:
+            self.column_max_lens[self._col_index] = max(self.column_max_lens[self._col_index], len(text))
+        self._current_row.append(
+            _TableCell(
+                text=text,
+                tag=self._cell_tag,
+                rowspan=self._cell_rowspan,
+                colspan=self._cell_colspan,
+            )
+        )
+        self._col_index += 1
+        self._cell_parts = []
+        self._in_cell = False
+        self._cell_rowspan = ""
+        self._cell_colspan = ""
 
-    def _append_newline(self) -> None:
-        if self.output and not self.output[-1].endswith("\n"):
-            self.output.append("\n")
+    def _flush_row(self) -> None:
+        if self._current_row:
+            self.rows.append(self._current_row)
+            self._current_row = []
+
+
+def _normalize_table_cell_text(text: str) -> str:
+    text = repair_mojibake(text).replace("\xa0", " ")
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
+    compact: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line in {"-", "*", "+"} and index + 1 < len(lines) and lines[index + 1]:
+            compact.append(f"- {lines[index + 1]}")
+            index += 2
+            continue
+        if line and line not in {"-", "*", "+"}:
+            compact.append(line)
+        index += 1
+    return "\n".join(compact).strip()
+
+
+class _HtmlCommentParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.comments: list[str] = []
+        self._skip_depth = 0
+        self._active = False
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style", "noscript", "svg"}:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        attrs_map = {key.lower(): value or "" for key, value in attrs}
+        if tag == "p" and _has_class_token(attrs_map, "comment"):
+            self._active = True
+            self._parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style", "noscript", "svg"} and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if self._skip_depth:
+            return
+        if tag == "p" and self._active:
+            text = _normalize_comment_text("".join(self._parts))
+            if text and text not in self.comments:
+                self.comments.append(text)
+            self._active = False
+            self._parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth or not self._active:
+            return
+        self._parts.append(data)
 
 
 def extract_html_headings(html: str) -> list[HtmlHeading]:
@@ -740,6 +1175,12 @@ class _HtmlAnchorHeadingParser(HTMLParser):
 def _heading_level_from_class(attrs_map: dict[str, str]) -> int | None:
     match = _HEADING_CLASS_RE.search(attrs_map.get("class", ""))
     return int(match.group(1)) if match else None
+
+
+def _has_class_token(attrs_map: dict[str, str], token: str) -> bool:
+    classes = re.split(r"\s+", attrs_map.get("class", "").strip())
+    token = token.casefold()
+    return any(item.casefold() == token for item in classes if item)
 
 
 def _append_anchor(anchors: list[str], value: str) -> None:
