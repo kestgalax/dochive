@@ -13,7 +13,7 @@ Dochive supports MadCap WebHelp through explicit TOC discovery from `Data/HelpSy
 - `docs/` contains usage notes, roadmap material, and stage artifacts.
 - User-facing docs are bilingual pairs: `README.md` / `README.ru.md`, `docs/USAGE.md` / `docs/USAGE.ru.md`, and `CHANGELOG.md` / `CHANGELOG.ru.md`. Keep paired English and Russian docs aligned when changing install, usage, license, dependency, changelog, or responsible-use text.
 - `CHANGELOG.md` at the repository root is what GitHub shows as the Changelog tab next to README and License.
-- Use `dochive changelog guide` for the bilingual notes format, then `dochive changelog apply --notes-file <path>` to prepend a release to both changelog files.
+- Use the Cursor slash command `/changelog` (`.cursor/commands/changelog.md`) to package chat context into bilingual `CHANGELOG.md` / `CHANGELOG.ru.md` releases.
 - `LICENSE` and `NOTICE` contain project licensing and attribution details.
 - `main_page/`, `mirror/`, `.tmp-test-runs/`, `.crawl4ai-data/`, `.playwright-browsers/`, and `tmp*` directories are generated, mirrored, cached, or temporary data. Do not edit them unless the task explicitly targets those artifacts.
 

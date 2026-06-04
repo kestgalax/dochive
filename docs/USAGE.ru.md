@@ -58,13 +58,12 @@ python -m dochive --help
 
 ## Обзор команд
 
-Dochive предоставляет шесть команд:
+Dochive предоставляет пять команд:
 
 - `dochive mirror`: зеркалирует URL, локальный HTML-файл или локальную HTML-директорию в Markdown и YAML catalogs.
 - `dochive structure`: обнаруживает и сохраняет web navigation structure перед зеркалированием контента.
 - `dochive catalog`: печатает ожидаемые пути catalog files для mirror.
 - `dochive query`: выполняет lexical search по mirrored Markdown и YAML files.
-- `dochive changelog`: упаковывает заметки сессии в bilingual записи `CHANGELOG.md` / `CHANGELOG.ru.md`.
 - `dochive publish`: коммитит и опционально push-ит mirror directory через Git.
 
 ### macOS Homebrew Python
@@ -455,57 +454,9 @@ _catalog/errors.yaml
 
 Если remote image downloads завершаются с `CERTIFICATE_VERIFY_FAILED`, Python не смог проверить HTTPS certificate chain сайта. Используйте Python environment с настроенными CA certificates, например свежий `.venv`, созданный через Homebrew `python3`, затем переустановите Dochive внутри него. Для python.org macOS installer один раз запустите bundled `/Applications/Python 3.x/Install Certificates.command` и повторите mirror.
 
-## Заметки для CHANGELOG
+## Обновление CHANGELOG
 
-Используйте `dochive changelog`, чтобы превратить заметки из чата или ревью в релиз Keep a Changelog сразу для `CHANGELOG.md` и `CHANGELOG.ru.md`.
-
-Показать формат заметок для агента:
-
-```bash
-dochive changelog guide
-```
-
-Сохраните заметки, например `notes.md`:
-
-```markdown
-version: 0.2.1
-date: 2026-06-10
-branch: codex/feature-branch
-
-[en]
-### Added
-- English change summary.
-
-### Fixed
-- English bug fix.
-
-[ru]
-### Added
-- То же изменение по-русски.
-
-### Fixed
-- То же исправление по-русски.
-```
-
-Предпросмотр блоков релиза:
-
-```bash
-dochive changelog draft --notes-file notes.md
-```
-
-Добавить их в начало обоих changelog-файлов:
-
-```bash
-dochive changelog apply --notes-file notes.md
-```
-
-Передать заметки через stdin:
-
-```bash
-cat notes.md | dochive changelog apply
-```
-
-`apply` отклоняет дубликаты `version`, которые уже есть в changelog-файлах.
+В Cursor используйте slash-команду проекта `/changelog`, чтобы оформить текущую сессию чата в bilingual-записи `CHANGELOG.md` и `CHANGELOG.ru.md`. Определение команды: `.cursor/commands/changelog.md`.
 
 ## Публикация через Git
 

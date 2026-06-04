@@ -4,7 +4,6 @@ import argparse
 import sys
 from pathlib import Path
 
-from .changelog_cmd import add_changelog_parser, changelog_command
 from .local_source import crawl_local_html
 from .models import MirrorConfig
 from .publish import publish_mirror
@@ -29,8 +28,6 @@ def main(argv: list[str] | None = None) -> int:
         return query_command(args)
     if args.command == "publish":
         return publish_command(args)
-    if args.command == "changelog":
-        return changelog_command(args)
     parser.print_help()
     return 1
 
@@ -215,7 +212,6 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--dry-run", action="store_true", help="Show Git actions without changing anything.")
     publish.add_argument("--init", action="store_true", help="Initialize Git in --root when it is not a worktree.")
     publish.add_argument("--push", action="store_true", help="Run git push after a successful commit.")
-    add_changelog_parser(subparsers)
     return parser
 
 
