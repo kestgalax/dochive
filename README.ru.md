@@ -1,6 +1,6 @@
 # Dochive
 
-[English](README.md) | [Русский](README.ru.md)
+[English](README.md) | [Русский](README.ru.md) · [История изменений](CHANGELOG.ru.md)
 
 CLI-инструмент для зеркалирования HTML-документации в Markdown-first репозиторий:
 

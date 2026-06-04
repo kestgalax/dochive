@@ -11,7 +11,9 @@ Dochive supports MadCap WebHelp through explicit TOC discovery from `Data/HelpSy
 - `src/dochive/` contains the CLI entrypoint and library modules.
 - `tests/` contains focused pytest coverage for crawling, URL utilities, Markdown normalization, and writer layout behavior.
 - `docs/` contains usage notes, roadmap material, and stage artifacts.
-- User-facing docs are bilingual pairs: `README.md` / `README.ru.md` and `docs/USAGE.md` / `docs/USAGE.ru.md`. Keep paired English and Russian docs aligned when changing install, usage, license, dependency, or responsible-use text.
+- User-facing docs are bilingual pairs: `README.md` / `README.ru.md`, `docs/USAGE.md` / `docs/USAGE.ru.md`, and `CHANGELOG.md` / `CHANGELOG.ru.md`. Keep paired English and Russian docs aligned when changing install, usage, license, dependency, changelog, or responsible-use text.
+- `CHANGELOG.md` at the repository root is what GitHub shows as the Changelog tab next to README and License.
+- Use `dochive changelog guide` for the bilingual notes format, then `dochive changelog apply --notes-file <path>` to prepend a release to both changelog files.
 - `LICENSE` and `NOTICE` contain project licensing and attribution details.
 - `main_page/`, `mirror/`, `.tmp-test-runs/`, `.crawl4ai-data/`, `.playwright-browsers/`, and `tmp*` directories are generated, mirrored, cached, or temporary data. Do not edit them unless the task explicitly targets those artifacts.
 

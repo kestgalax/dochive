@@ -58,12 +58,13 @@ python -m dochive --help
 
 ## Command Overview
 
-Dochive exposes five commands:
+Dochive exposes six commands:
 
 - `dochive mirror`: mirror a URL, local HTML file, or local HTML directory into Markdown and YAML catalogs.
 - `dochive structure`: discover and save a web navigation structure before content mirroring.
 - `dochive catalog`: print the expected catalog file paths for a mirror.
 - `dochive query`: run lexical search over mirrored Markdown and YAML files.
+- `dochive changelog`: package session notes into bilingual `CHANGELOG.md` / `CHANGELOG.ru.md` entries.
 - `dochive publish`: commit and optionally push a mirror directory with Git.
 
 ### macOS Homebrew Python
@@ -453,6 +454,58 @@ Typical warnings:
 - missing or failed assets.
 
 If remote image downloads fail with `CERTIFICATE_VERIFY_FAILED`, Python could not verify the site's HTTPS certificate chain. Use a Python environment with CA certificates configured, for example a fresh `.venv` created from Homebrew `python3`, then reinstall Dochive inside it. For the python.org macOS installer, run the bundled `/Applications/Python 3.x/Install Certificates.command` once and retry the mirror.
+
+## Changelog Notes
+
+Use `dochive changelog` when you want to turn chat or review notes into a Keep a Changelog release for both `CHANGELOG.md` and `CHANGELOG.ru.md`.
+
+Print the agent-oriented notes format:
+
+```bash
+dochive changelog guide
+```
+
+Save session notes, for example `notes.md`:
+
+```markdown
+version: 0.2.1
+date: 2026-06-10
+branch: codex/feature-branch
+
+[en]
+### Added
+- English change summary.
+
+### Fixed
+- English bug fix.
+
+[ru]
+### Added
+- То же изменение по-русски.
+
+### Fixed
+- То же исправление по-русски.
+```
+
+Preview the rendered release blocks:
+
+```bash
+dochive changelog draft --notes-file notes.md
+```
+
+Apply them at the top of both changelog files:
+
+```bash
+dochive changelog apply --notes-file notes.md
+```
+
+Pipe notes from stdin:
+
+```bash
+cat notes.md | dochive changelog apply
+```
+
+`apply` refuses duplicate `version` values already present in the changelog files.
 
 ## Publish With Git
 
