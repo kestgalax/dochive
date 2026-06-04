@@ -20,7 +20,7 @@ Dochive is general-purpose, but it has first-class support for MadCap WebHelp an
 - Reads MadCap WebHelp navigation from `Data/HelpSystem.xml` when available instead of relying only on page links.
 - Handles Wiki.js-style extensionless URLs, language prefixes, service links, permalink heading anchors, and repeated site chrome.
 - Downloads or copies images into page-local media folders; HTML video sources can also be localized with `--save-assets videos`.
-- Renders images as Gramax `<image .../>` tags with intrinsic sizes or capped width.
+- Renders images as Gramax `<image .../>` tags with intrinsic sizes or capped width; small list icons stay inline.
 - Recovers headings from styled HTML patterns such as `p class="H4"` and MadCap `h2 data-mc-autonum`, including insertion before the next paragraph or list item when Crawl4AI omits the heading text.
 - Cleans common documentation noise, including repeated page chrome, selected tags, selectors, and exact noisy lines.
 - Writes catalogs and reports for pages, links, assets, structure, errors, and incremental sync.

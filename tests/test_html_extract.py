@@ -51,6 +51,33 @@ def test_promote_markdown_headings_matches_follower_with_markdown_link() -> None
     assert promoted.splitlines()[0] == "### Objects"
 
 
+def test_promote_markdown_headings_inserts_before_preceding_diagram() -> None:
+    html = """
+    <html><body>
+    <p class="H3">Границы Процесса</p>
+    <p class="ris"><img src="../Resources/Images/00/srm_01.png" /></p>
+    <p>В рамках Процесса обрабатываются следующие типы ЗНО:</p>
+    </body></html>
+    """
+    markdown = "\n".join(
+        [
+            "### Правила обработки",
+            "Rules section content.",
+            "",
+            '<image src="./srm_01.png" width="1068px" height="459px"/>',
+            "",
+            "В рамках Процесса обрабатываются следующие типы ЗНО:",
+            "  * ЗНО;",
+        ]
+    )
+    promoted = promote_markdown_headings(markdown, html)
+    lines = promoted.splitlines()
+    heading_index = lines.index("### Границы Процесса")
+    image_index = next(index for index, line in enumerate(lines) if "srm_01" in line)
+    follower_index = next(index for index, line in enumerate(lines) if line.startswith("В рамках Процесса"))
+    assert heading_index < image_index < follower_index
+
+
 def test_promote_markdown_headings_keeps_existing_anchor_insertion() -> None:
     html = """
     <html><body>

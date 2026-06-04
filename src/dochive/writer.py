@@ -39,6 +39,16 @@ HTML_MEDIA_URL_RE = re.compile(
     r"(<(?:a|video|source)\b[^>]*\b(?:href|path|src)=[\"'])([^\"']+)([\"'][^>]*>)",
     re.IGNORECASE,
 )
+GRAMAX_IMAGE_SIZE_RE = re.compile(
+    r"""<image\b[^>]*\bwidth="(\d+)px"[^>]*\bheight="(\d+)px"|<image\b[^>]*\bheight="(\d+)px"[^>]*\bwidth="(\d+)px" """,
+    re.IGNORECASE,
+)
+GRAMAX_IMAGE_SCALE_RE = re.compile(r'\s+scale="\d+"')
+MERGED_INLINE_ICON_LIST_RE = re.compile(
+    r"^(\s*)(?:[-*])\s+(<image\b[^>]+/>)\s+(.+)$",
+    re.IGNORECASE,
+)
+EMPTY_LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*])\s*$")
 DOC_ROOT_FILENAME = ".doc-root.yaml"
 
 
@@ -1095,12 +1105,13 @@ def _rewrite_markdown_links(
         anchor_headings_by_url,
         asset_by_source,
     )
-    markdown = _normalize_media_spacing(markdown)
+    markdown = _normalize_media_spacing(markdown, config)
+    markdown = _collapse_inline_icon_images(markdown, config)
     markdown = _drop_leading_heading_anchor_links(markdown, page.anchor_headings)
     return _render_details_sections(markdown)
 
 
-def _normalize_media_spacing(markdown: str) -> str:
+def _normalize_media_spacing(markdown: str, config: MirrorConfig) -> str:
     output: list[str] = []
     lines = markdown.splitlines()
     in_fence = False
@@ -1109,7 +1120,7 @@ def _normalize_media_spacing(markdown: str) -> str:
             in_fence = not in_fence
             output.append(line)
             continue
-        if not in_fence and _is_media_line(line):
+        if not in_fence and _is_media_line(line) and not _is_inline_icon_image_line(line.strip(), config):
             if output and output[-1].strip():
                 output.append("")
             output.append(line.strip())
@@ -1238,12 +1249,103 @@ def _image_alt_from_prefix(prefix: str) -> str:
 
 
 def _render_image(path: str, alt: str, asset: Asset, config: MirrorConfig) -> str:
+    if _is_inline_icon_asset(asset, config):
+        if config.image_render_mode == "html":
+            return f'<image src="{path}"{_image_size_attrs(asset, config, inline_icon=True)} float="left"/>'
+        return f"![{alt}]({path})"
     if config.image_render_mode == "html":
         return f'\n\n<image src="{path}"{_image_size_attrs(asset, config)} float="center"/>\n\n'
     return f"![{alt}]({path})"
 
 
-def _image_size_attrs(asset: Asset, config: MirrorConfig) -> str:
+def _is_inline_icon_asset(asset: Asset, config: MirrorConfig) -> bool:
+    max_px = config.image_inline_max_px
+    if not max_px or not asset.width or not asset.height:
+        return False
+    return max(asset.width, asset.height) <= max_px
+
+
+def _gramax_image_dimensions(line: str) -> tuple[int, int] | None:
+    match = GRAMAX_IMAGE_SIZE_RE.search(line)
+    if not match:
+        return None
+    if match.group(1) and match.group(2):
+        return int(match.group(1)), int(match.group(2))
+    if match.group(3) and match.group(4):
+        return int(match.group(4)), int(match.group(3))
+    return None
+
+
+def _is_inline_icon_image_line(line: str, config: MirrorConfig) -> bool:
+    max_px = config.image_inline_max_px
+    if not max_px or not line.lower().startswith("<image "):
+        return False
+    dimensions = _gramax_image_dimensions(line)
+    if not dimensions:
+        return False
+    width, height = dimensions
+    return max(width, height) <= max_px
+
+
+def _collapse_inline_icon_images(markdown: str, config: MirrorConfig) -> str:
+    if not config.image_inline_max_px:
+        return markdown
+
+    lines = markdown.splitlines()
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        merged = MERGED_INLINE_ICON_LIST_RE.match(line)
+        if merged and _is_inline_icon_image_line(merged.group(2).strip(), config):
+            indent, image_tag, text = merged.groups()
+            output.extend(_format_inline_icon_list_lines(indent, image_tag, text))
+            index += 1
+            continue
+
+        if _is_inline_icon_image_line(stripped, config):
+            image_tag = _normalize_inline_icon_image_tag(stripped)
+            while output and not output[-1].strip():
+                output.pop()
+            if output and EMPTY_LIST_ITEM_RE.fullmatch(output[-1]):
+                list_match = EMPTY_LIST_ITEM_RE.fullmatch(output[-1])
+                assert list_match is not None
+                indent = list_match.group(1)
+                output.pop()
+                next_index = index + 1
+                while next_index < len(lines) and not lines[next_index].strip():
+                    next_index += 1
+                text = lines[next_index].strip() if next_index < len(lines) else ""
+                output.extend(_format_inline_icon_list_lines(indent, image_tag, text))
+                index = next_index + 1
+                continue
+        output.append(line)
+        index += 1
+    return "\n".join(output)
+
+
+def _normalize_inline_icon_image_tag(tag: str) -> str:
+    normalized = tag.replace('float="center"', 'float="left"')
+    return GRAMAX_IMAGE_SCALE_RE.sub("", normalized)
+
+
+def _inline_icon_text_line(text: str) -> str:
+    text = text.strip()
+    if text.startswith("["):
+        return f" {text}"
+    return f"  {text}"
+
+
+def _format_inline_icon_list_lines(indent: str, image_tag: str, text: str) -> list[str]:
+    image_tag = _normalize_inline_icon_image_tag(image_tag)
+    lines = [f"{indent}* {image_tag} "]
+    if text.strip():
+        lines.append(_inline_icon_text_line(text))
+    return lines
+
+
+def _image_size_attrs(asset: Asset, config: MirrorConfig, *, inline_icon: bool = False) -> str:
     if config.image_size_mode == "none" or not asset.width or not asset.height:
         return ""
 
@@ -1257,7 +1359,10 @@ def _image_size_attrs(asset: Asset, config: MirrorConfig) -> str:
         height = max(1, round(height * ratio))
         scale = max(1, round((width / original_width) * 100))
 
-    return f' crop="0,0,100,100" scale="{scale}" width="{width}px" height="{height}px"'
+    size_attrs = f' width="{width}px" height="{height}px"'
+    if inline_icon:
+        return f' crop="0,0,100,100"{size_attrs}'
+    return f' crop="0,0,100,100" scale="{scale}"{size_attrs}'
 
 
 def _nested_image_to_linked(

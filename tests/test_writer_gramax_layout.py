@@ -981,8 +981,9 @@ def test_index_page_assets_stay_beside_index_file() -> None:
 
 def test_writer_separates_media_tags_with_blank_lines() -> None:
     markdown = "Before.\n<video path=\"./demo.mp4\"/>\nAfter.\n<image src=\"./demo.png\"/>\nDone."
+    config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
 
-    assert _normalize_media_spacing(markdown) == (
+    assert _normalize_media_spacing(markdown, config) == (
         "Before.\n\n"
         "<video path=\"./demo.mp4\"/>\n\n"
         "After.\n\n"

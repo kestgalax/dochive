@@ -815,8 +815,29 @@ def _line_contains_anchor(line: str, anchor: str) -> bool:
     return anchor in normalized_line
 
 
+def _is_markdown_media_line(line: str) -> bool:
+    stripped = line.strip().lower()
+    return stripped.startswith(("<image ", "<video "))
+
+
 def _previous_block_start(lines: list[str], index: int) -> int:
-    return index
+    insertion = index
+    cursor = index - 1
+    while cursor >= 0 and not lines[cursor].strip():
+        cursor -= 1
+    if cursor < 0 or not _is_markdown_media_line(lines[cursor]):
+        return insertion
+
+    while cursor >= 0:
+        if _is_markdown_media_line(lines[cursor]):
+            insertion = cursor
+            cursor -= 1
+            continue
+        if not lines[cursor].strip():
+            cursor -= 1
+            continue
+        break
+    return insertion
 
 
 def _normalize_heading_text(text: str) -> str:
