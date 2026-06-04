@@ -59,20 +59,16 @@ def test_injects_clean_html_table_for_multiline_wikijs_table() -> None:
     assert inject_html_tables(markdown, html, "https://example.com/ru/current") == """# Фаза
 
 <table header="row">
-{% colwidth=[156,156] %}
 <tr>
 
 <td rowspan="2">
 
-
-          
 **Цели**
-          <ul><li>Первый пункт</li><li>Второй пункт</li></ul>
-        
+- Первый пункт
+- Второй пункт
 
 </td>
 <td>
-
 
 [Следующая страница](https://example.com/ru/next)
 
@@ -83,12 +79,13 @@ def test_injects_clean_html_table_for_multiline_wikijs_table() -> None:
 
 <td>
 
-
 *Выход*
 
 </td>
 </tr>
+
 </table>
+
 
 ## После
 """
@@ -103,24 +100,16 @@ def test_inject_html_tables_keeps_paragraph_after_regular_markdown_table() -> No
 Paragraph after table.
 """
 
-    assert inject_html_tables(markdown, html, "https://example.com/docs") == """<table header="row">
-{% colwidth=[156,156] %}
-<tr>
+    assert inject_html_tables(markdown, html, "https://example.com/docs") == """{% table header="row" %}
 
-<td>
+---
 
-A
+*  {% colwidth=[256] %}
+   A
+*  {% colwidth=[256] %}
+   B
 
-</td>
-<td>
-
-B
-
-</td>
-</tr>
-
-</table>
-
+{% /table %}
 Paragraph after table.
 """
 

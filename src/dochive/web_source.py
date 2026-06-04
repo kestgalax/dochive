@@ -14,6 +14,7 @@ from .html_extract import (
     extract_html_anchor_headings,
     extract_html_videos,
     inject_html_comments,
+    extract_html_document_title,
     inject_html_tables,
     inject_html_videos,
     promote_markdown_headings,
@@ -430,6 +431,9 @@ async def _fetch_pages_from_navigation_index(
             markdown = confluence_markdown(html, entry.fetch_url)
             links, media = confluence_links_and_assets(html, entry.fetch_url)
         if html:
+            document_title = extract_html_document_title(html)
+            if document_title:
+                title = document_title
             markdown = promote_markdown_headings(markdown, html)
             markdown = inject_html_videos(markdown, html, entry.fetch_url)
             if config.source_type != "confluence":
@@ -503,6 +507,9 @@ async def _fetch_pages_from_structure_entries(
             markdown = confluence_markdown(html, entry.fetch_url)
             links, media = confluence_links_and_assets(html, entry.fetch_url)
         if html:
+            document_title = extract_html_document_title(html)
+            if document_title:
+                title = document_title
             markdown = promote_markdown_headings(markdown, html)
             markdown = inject_html_videos(markdown, html, entry.fetch_url)
             if config.source_type != "confluence":
