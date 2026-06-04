@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from dochive.html_extract import extract_html_headings, promote_markdown_headings
+from dochive.html_extract import (
+    extract_html_headings,
+    extract_html_tables,
+    inject_html_comments,
+    inject_html_tables,
+    promote_markdown_headings,
+)
 
 
 MADCAP_H3_HTML = """
@@ -76,6 +82,106 @@ def test_promote_markdown_headings_inserts_before_preceding_diagram() -> None:
     image_index = next(index for index, line in enumerate(lines) if "srm_01" in line)
     follower_index = next(index for index, line in enumerate(lines) if line.startswith("В рамках Процесса"))
     assert heading_index < image_index < follower_index
+
+
+MADCAP_TABLE_WITH_TAB_LIST = """
+<table class="TableStyle-PatternedRows">
+<thead><tr>
+<th>ID</th><th>Наименование показателя</th><th>Метрика</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>G-INC1</td>
+<td>Обеспечение высокого качества поддержки Услуг</td>
+<td><ul class="tab"><li value="1">M-INC1 Средний балл</li></ul></td>
+</tr>
+</tbody>
+</table>
+"""
+
+
+def test_sanitize_table_keeps_ul_li_inside_td() -> None:
+    tables = extract_html_tables(
+        MADCAP_TABLE_WITH_TAB_LIST,
+        "https://example.com/page.htm",
+    )
+    assert len(tables) == 1
+    table = tables[0]
+    assert "<ul>" in table
+    assert "<li>" in table
+    assert "M-INC1 Средний балл" in table
+    assert "-  M-INC1" not in table
+
+
+def test_inject_html_tables_absorbs_orphan_metric_bullets() -> None:
+    markdown = "\n".join(
+        [
+            "## Цели и метрики",
+            "- M-INC1 Средний балл",
+            "- M-INC2 Процент инцидентов",
+            "| ID | Наименование показателя | Метрика |",
+            "| --- | --- | --- |",
+            "| G-INC1 | Обеспечение высокого качества поддержки Услуг |",
+            "| G-INC2 | Обеспечение высокой доступности |",
+        ]
+    )
+    injected = inject_html_tables(markdown, MADCAP_TABLE_WITH_TAB_LIST, "https://example.com/page.htm")
+    assert "- M-INC1" not in injected
+    assert "- M-INC2" not in injected
+    assert "<table header=\"row\">" in injected
+    assert "<ul>" in injected
+    assert "M-INC1 Средний балл" in injected
+
+
+def test_inject_html_tables_handles_two_tables_in_order() -> None:
+    html = (
+        "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>x</td></tr></table>"
+        "<table><tr><th>C</th><th>D</th></tr><tr><td>2</td><td>y</td></tr></table>"
+    )
+    markdown = "\n".join(
+        [
+            "| A | B |",
+            "| --- | --- |",
+            "| 1 | x |",
+            "between",
+            "| C | D |",
+            "| --- | --- |",
+            "| 2 | y |",
+        ]
+    )
+    injected = inject_html_tables(markdown, html, "https://example.com/page.htm")
+    assert injected.count("<table header=\"row\">") == 2
+    assert "between" in injected
+
+
+def test_inject_html_comments_replaces_madcap_comment_paragraph() -> None:
+    html = '<p class="comment">Если в карточке только одна вкладка, то ее название не отображается.</p>'
+    markdown = "Если в карточке только одна вкладка, то ее название не отображается."
+    injected = inject_html_comments(markdown, html)
+    assert ":::note:true" in injected
+    assert "ее название не отображается" in injected
+    assert injected.strip().endswith(":::")
+
+
+def test_sanitize_table_adds_colwidth_for_wide_description_column() -> None:
+    html = """
+    <table>
+    <tr><th>Параметр</th><th>Тип</th><th>Описание</th></tr>
+    <tr>
+    <td>host</td>
+    <td>string</td>
+    <td>Адрес шлюза и дополнительные пояснения по настройке подключения к внешним системам</td>
+    </tr>
+    </table>
+    """
+    tables = extract_html_tables(html, "https://example.com/gateway.htm")
+    assert len(tables) == 1
+    table = tables[0]
+    assert "{% colwidth=[" in table
+    match = table.split("{% colwidth=[", 1)[1].split("] %}", 1)[0]
+    widths = [int(item) for item in match.split(",")]
+    assert len(widths) == 3
+    assert widths[2] > widths[0]
 
 
 def test_promote_markdown_headings_keeps_existing_anchor_insertion() -> None:

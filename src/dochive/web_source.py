@@ -13,6 +13,7 @@ from .confluence import confluence_body_html, confluence_links_and_assets, confl
 from .html_extract import (
     extract_html_anchor_headings,
     extract_html_videos,
+    inject_html_comments,
     inject_html_tables,
     inject_html_videos,
     promote_markdown_headings,
@@ -433,6 +434,7 @@ async def _fetch_pages_from_navigation_index(
             markdown = inject_html_videos(markdown, html, entry.fetch_url)
             if config.source_type != "confluence":
                 markdown = inject_html_tables(markdown, html, entry.fetch_url)
+            markdown = inject_html_comments(markdown, html)
         anchor_headings = extract_html_anchor_headings(html) if html else {}
         markdown = normalize_markdown(
             markdown,
@@ -505,6 +507,7 @@ async def _fetch_pages_from_structure_entries(
             markdown = inject_html_videos(markdown, html, entry.fetch_url)
             if config.source_type != "confluence":
                 markdown = inject_html_tables(markdown, html, entry.fetch_url)
+            markdown = inject_html_comments(markdown, html)
         anchor_headings = extract_html_anchor_headings(html) if html else {}
         markdown = normalize_markdown(
             markdown,

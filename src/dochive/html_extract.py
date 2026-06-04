@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import statistics
 from dataclasses import dataclass, field
 from html import escape, unescape
 from html.parser import HTMLParser
@@ -18,6 +19,12 @@ _MARKDOWN_HEADING_PARSE_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*\S)\s*$")
 _FOLLOWING_SNIPPET_LENGTH = 60
 _LIST_ITEM_PREFIX_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+")
 _MARKDOWN_LINK_TEXT_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_ORPHAN_TABLE_BULLET_RE = re.compile(r"^\s*[-*+]\s+\S")
+_COLWIDTH_NARROW = 156
+_COLWIDTH_WIDE_MIN = 280
+_COLWIDTH_WIDE_MAX = 600
+_COLWIDTH_WIDE_CHAR_FACTOR = 4
+_COLWIDTH_WIDE_LEN_THRESHOLD = 80
 
 
 @dataclass
@@ -215,8 +222,10 @@ def inject_html_tables(markdown: str, html: str, base_url: str) -> str:
     table_index = 0
     while index < len(lines):
         if table_index < len(tables) and _looks_like_markdown_table_start(lines, index):
+            block_start = _markdown_table_block_start(lines, index)
             end = _markdown_table_block_end(lines, index)
             if end > index:
+                _drop_emitted_lines(output, index - block_start)
                 if output and output[-1].strip():
                     output.append("")
                 output.append(tables[table_index])
@@ -231,6 +240,31 @@ def inject_html_tables(markdown: str, html: str, base_url: str) -> str:
 
     if table_index == 0:
         return markdown
+    return "\n".join(output).strip() + "\n"
+
+
+def inject_html_comments(markdown: str, html: str) -> str:
+    """Convert MadCap <p class=\"comment\"> blocks into Gramax note callouts."""
+
+    comments = extract_html_comments(html)
+    if not comments:
+        return markdown
+
+    output: list[str] = []
+    for line in markdown.splitlines():
+        if line.strip().startswith(":::"):
+            output.append(line)
+            continue
+        replaced = False
+        for comment in comments:
+            if _line_matches_comment_text(line, comment):
+                output.append(":::note:true")
+                output.append(comment)
+                output.append(":::")
+                replaced = True
+                break
+        if not replaced:
+            output.append(line)
     return "\n".join(output).strip() + "\n"
 
 
@@ -250,10 +284,20 @@ def _sanitize_html_table(html: str, base_url: str) -> str:
     rendered = "".join(parser.output).strip()
     if rendered.lower().startswith("<table") and rendered.lower().endswith("</table>"):
         result = rendered.replace("<table>", '<table header="row">', 1)
+        colwidth = _format_colwidth(parser.column_max_lens)
+        if colwidth:
+            result = result.replace('<table header="row">', f'<table header="row">\n{colwidth}', 1)
         result = re.sub(r"</tbody>\s*", "", result, flags=re.IGNORECASE)
         result = re.sub(r"<tbody[^>]*>\s*", "", result, flags=re.IGNORECASE)
         return result
     return ""
+
+
+def extract_html_comments(html: str) -> list[str]:
+    parser = _HtmlCommentParser()
+    parser.feed(html)
+    parser.close()
+    return parser.comments
 
 
 def _looks_like_markdown_table_start(lines: list[str], index: int) -> bool:
@@ -262,6 +306,26 @@ def _looks_like_markdown_table_start(lines: list[str], index: int) -> bool:
         return False
     window = lines[index : min(len(lines), index + 8)]
     return any(re.match(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$", line) for line in window)
+
+
+def _drop_emitted_lines(output: list[str], count: int) -> None:
+    while count > 0 and output:
+        output.pop()
+        count -= 1
+
+
+def _markdown_table_block_start(lines: list[str], table_start: int) -> int:
+    start = table_start
+    while start > 0:
+        previous = lines[start - 1]
+        if not previous.strip():
+            start -= 1
+            continue
+        if _is_orphan_table_bullet_line(previous):
+            start -= 1
+            continue
+        break
+    return start
 
 
 def _markdown_table_block_end(lines: list[str], start: int) -> int:
@@ -278,11 +342,25 @@ def _markdown_table_block_end(lines: list[str], start: int) -> int:
             and seen_separator
             and stripped
             and not _is_markdown_table_continuation(lines[index])
-            and _is_after_regular_markdown_table(lines, index)
+            and (
+                _is_after_regular_markdown_table(lines, index)
+                or _is_plain_text_between_table_blocks(lines, index)
+            )
         ):
             break
         index += 1
     return index
+
+
+def _is_plain_text_between_table_blocks(lines: list[str], index: int) -> bool:
+    stripped = lines[index].strip()
+    if not stripped or stripped.startswith("|") or _MARKDOWN_HEADING_RE.match(stripped):
+        return False
+    if _ORPHAN_TABLE_BULLET_RE.match(stripped) or _LIST_ITEM_PREFIX_RE.match(stripped):
+        return False
+    previous = lines[index - 1].strip() if index else ""
+    next_line = lines[index + 1].strip() if index + 1 < len(lines) else ""
+    return previous.startswith("|") and next_line.startswith("|")
 
 
 def _is_after_regular_markdown_table(lines: list[str], index: int) -> bool:
@@ -313,6 +391,44 @@ def _is_markdown_table_continuation(line: str) -> bool:
         or stripped.startswith(("- ", "* ", "+ "))
         or bool(re.match(r"^\d+\.\s+", stripped))
     )
+
+
+def _is_orphan_table_bullet_line(line: str) -> bool:
+    return bool(_ORPHAN_TABLE_BULLET_RE.match(line))
+
+
+def _format_colwidth(column_max_lens: list[int]) -> str | None:
+    if not column_max_lens:
+        return None
+    median = statistics.median(column_max_lens)
+    widths: list[int] = []
+    for max_len in column_max_lens:
+        wide = max_len >= _COLWIDTH_WIDE_LEN_THRESHOLD or (median > 0 and max_len >= 1.5 * median)
+        if wide:
+            width = min(
+                _COLWIDTH_WIDE_MAX,
+                max(_COLWIDTH_WIDE_MIN, int(max_len * _COLWIDTH_WIDE_CHAR_FACTOR)),
+            )
+        else:
+            width = _COLWIDTH_NARROW
+        widths.append(width)
+    return "{% colwidth=[" + ",".join(str(width) for width in widths) + "] %}"
+
+
+def _line_matches_comment_text(line: str, comment: str) -> bool:
+    normalized_line = _normalize_comment_text(line)
+    return bool(normalized_line and normalized_line == comment)
+
+
+def _normalize_comment_text(text: str) -> str:
+    stripped = repair_mojibake(text).replace("\xa0", " ").strip()
+    stripped = re.sub(r"^\s*[-*+]\s+", "", stripped)
+    stripped = re.sub(r"^\s*>\s+", "", stripped)
+    if stripped.startswith("*") and stripped.endswith("*") and len(stripped) > 2:
+        stripped = stripped[1:-1].strip()
+    if stripped.startswith("_") and stripped.endswith("_") and len(stripped) > 2:
+        stripped = stripped[1:-1].strip()
+    return re.sub(r"\s+", " ", stripped).strip()
 
 
 def extract_html_videos(html: str, base_url: str) -> list[list[str]]:
@@ -373,8 +489,12 @@ class _HtmlTableSanitizer(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
         self.output: list[str] = []
+        self.column_max_lens: list[int] = []
         self._skip_depth = 0
         self._in_td = False
+        self._in_cell = False
+        self._col_index = 0
+        self._cell_text: list[str] = []
         self._in_list: str | None = None
         self._link_text: list[str] = []
         self._link_href: str | None = None
@@ -394,8 +514,9 @@ class _HtmlTableSanitizer(HTMLParser):
                 self._link_text = []
             return
         if tag == "br":
-            if self._in_td:
+            if self._in_cell:
                 self.output.append("\n")
+                self._cell_text.append(" ")
             return
         if tag in self._INLINE_TAGS:
             if self._in_td:
@@ -404,32 +525,32 @@ class _HtmlTableSanitizer(HTMLParser):
                 self.output.append(f"<{tag}>")
             return
         if tag in self._BLOCK_TAGS:
-            if tag == "td":
-                self._in_td = True
-                self._in_list = None
-                attrs_str = self._render_attrs(attrs_map)
-                self.output.append(f"\n<td{attrs_str}>\n\n")
-                return
             if tag == "tr":
+                self._col_index = 0
                 self.output.append("\n<tr>\n")
                 return
-            if self._in_td:
-                if tag == "ul":
-                    self._in_list = "ul"
-                    self.output.append("\n")
-                    return
-                if tag == "ol":
-                    self._in_list = "ol"
-                    self.output.append("\n")
+            if tag in {"td", "th"}:
+                self._finish_cell()
+                self._in_cell = True
+                self._in_td = tag == "td"
+                self._in_list = None
+                self._cell_text = []
+                attrs_str = self._render_attrs(attrs_map)
+                cell_tag = "td" if tag == "td" else "th"
+                self.output.append(f"\n<{cell_tag}{attrs_str}>\n\n")
+                return
+            if self._in_cell:
+                if tag in {"ul", "ol"}:
+                    self._in_list = tag
+                    self.output.append(f"<{tag}>")
                     return
                 if tag == "li":
-                    marker = "-  " if self._in_list == "ul" else f"{self._td_list_index()}.  "
-                    self.output.append(f"\n{marker}")
+                    self.output.append("<li>")
                     return
                 if tag == "p":
                     self.output.append("\n")
                     return
-                self.output.append(f"\n")
+                self.output.append("\n")
                 return
             self._append_newline()
             self.output.append(f"<{tag}{self._render_attrs(attrs_map)}>")
@@ -444,6 +565,8 @@ class _HtmlTableSanitizer(HTMLParser):
         if tag == "a" and self._link_href:
             text = "".join(self._link_text).strip() or self._link_href
             self.output.append(f"[{text}]({self._link_href})")
+            if self._in_cell:
+                self._cell_text.append(text)
             self._link_href = None
             self._link_text = []
             return
@@ -455,18 +578,21 @@ class _HtmlTableSanitizer(HTMLParser):
             else:
                 self.output.append(f"</{tag}>")
         elif tag in self._BLOCK_TAGS:
-            if tag == "td":
-                self._in_td = False
-                self._in_list = None
-                self.output.append("\n\n</td>")
+            if tag in {"td", "th"}:
+                self._finish_cell()
+                cell_tag = "td" if tag == "td" else "th"
+                self.output.append(f"\n\n</{cell_tag}>")
             elif tag == "tr":
                 self.output.append("\n</tr>\n")
             elif tag == "table":
+                self._finish_cell()
                 self.output.append("\n</table>")
-            elif self._in_td:
-                if tag in {"ul", "ol"}:
+            elif self._in_cell:
+                if tag == "li":
+                    self.output.append("</li>")
+                elif tag in {"ul", "ol"}:
+                    self.output.append(f"</{tag}>")
                     self._in_list = None
-                    self.output.append("\n")
                 elif tag == "p":
                     pass
                 else:
@@ -475,25 +601,33 @@ class _HtmlTableSanitizer(HTMLParser):
                 self.output.append(f"</{tag}>")
                 self._append_newline()
 
-    def _td_list_index(self) -> int:
-        count = 0
-        for item in self.output:
-            if item.startswith("\n") and ". " in item:
-                count += 1
-        return count + 1
-
     def handle_data(self, data: str) -> None:
         if self._skip_depth:
             return
         if self._link_href is not None:
             self._link_text.append(data)
             return
-        if self._in_td:
+        if self._in_cell:
+            self._cell_text.append(data)
             self.output.append(data)
         else:
             text = re.sub(r"\s+", " ", data.replace("\xa0", " ")).strip()
             if text:
                 self.output.append(escape(text))
+
+    def _finish_cell(self) -> None:
+        if not self._in_cell:
+            return
+        text = re.sub(r"\s+", " ", "".join(self._cell_text).replace("\xa0", " ")).strip()
+        while len(self.column_max_lens) <= self._col_index:
+            self.column_max_lens.append(0)
+        if text:
+            self.column_max_lens[self._col_index] = max(self.column_max_lens[self._col_index], len(text))
+        self._col_index += 1
+        self._cell_text = []
+        self._in_cell = False
+        self._in_td = False
+        self._in_list = None
 
     def _render_attrs(self, attrs_map: dict[str, str]) -> str:
         output: list[str] = []
@@ -506,6 +640,44 @@ class _HtmlTableSanitizer(HTMLParser):
     def _append_newline(self) -> None:
         if self.output and not self.output[-1].endswith("\n"):
             self.output.append("\n")
+
+
+class _HtmlCommentParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.comments: list[str] = []
+        self._skip_depth = 0
+        self._active = False
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style", "noscript", "svg"}:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        attrs_map = {key.lower(): value or "" for key, value in attrs}
+        if tag == "p" and _has_class_token(attrs_map, "comment"):
+            self._active = True
+            self._parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style", "noscript", "svg"} and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if self._skip_depth:
+            return
+        if tag == "p" and self._active:
+            text = _normalize_comment_text("".join(self._parts))
+            if text and text not in self.comments:
+                self.comments.append(text)
+            self._active = False
+            self._parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth or not self._active:
+            return
+        self._parts.append(data)
 
 
 def extract_html_headings(html: str) -> list[HtmlHeading]:
@@ -740,6 +912,12 @@ class _HtmlAnchorHeadingParser(HTMLParser):
 def _heading_level_from_class(attrs_map: dict[str, str]) -> int | None:
     match = _HEADING_CLASS_RE.search(attrs_map.get("class", ""))
     return int(match.group(1)) if match else None
+
+
+def _has_class_token(attrs_map: dict[str, str], token: str) -> bool:
+    classes = re.split(r"\s+", attrs_map.get("class", "").strip())
+    token = token.casefold()
+    return any(item.casefold() == token for item in classes if item)
 
 
 def _append_anchor(anchors: list[str], value: str) -> None:

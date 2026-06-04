@@ -59,6 +59,7 @@ def test_injects_clean_html_table_for_multiline_wikijs_table() -> None:
     assert inject_html_tables(markdown, html, "https://example.com/ru/current") == """# Фаза
 
 <table header="row">
+{% colwidth=[156,156] %}
 <tr>
 
 <td rowspan="2">
@@ -66,13 +67,7 @@ def test_injects_clean_html_table_for_multiline_wikijs_table() -> None:
 
           
 **Цели**
-          
-
--  Первый пункт
-
--  Второй пункт
-
-
+          <ul><li>Первый пункт</li><li>Второй пункт</li></ul>
         
 
 </td>
@@ -109,6 +104,7 @@ Paragraph after table.
 """
 
     assert inject_html_tables(markdown, html, "https://example.com/docs") == """<table header="row">
+{% colwidth=[156,156] %}
 <tr>
 
 <td>
