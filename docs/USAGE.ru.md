@@ -454,6 +454,10 @@ _catalog/errors.yaml
 
 Если remote image downloads завершаются с `CERTIFICATE_VERIFY_FAILED`, Python не смог проверить HTTPS certificate chain сайта. Используйте Python environment с настроенными CA certificates, например свежий `.venv`, созданный через Homebrew `python3`, затем переустановите Dochive внутри него. Для python.org macOS installer один раз запустите bundled `/Applications/Python 3.x/Install Certificates.command` и повторите mirror.
 
+## Обновление CHANGELOG
+
+В Cursor используйте slash-команду проекта `/changelog`, чтобы оформить текущую сессию чата в bilingual-записи `CHANGELOG.md` и `CHANGELOG.ru.md`. Определение команды: `.cursor/commands/changelog.md`.
+
 ## Публикация через Git
 
 Сначала просмотрите Git actions:

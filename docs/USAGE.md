@@ -454,6 +454,10 @@ Typical warnings:
 
 If remote image downloads fail with `CERTIFICATE_VERIFY_FAILED`, Python could not verify the site's HTTPS certificate chain. Use a Python environment with CA certificates configured, for example a fresh `.venv` created from Homebrew `python3`, then reinstall Dochive inside it. For the python.org macOS installer, run the bundled `/Applications/Python 3.x/Install Certificates.command` once and retry the mirror.
 
+## Changelog Updates
+
+In Cursor, use the project slash command `/changelog` to turn the current chat session into bilingual `CHANGELOG.md` and `CHANGELOG.ru.md` entries. The command definition lives in `.cursor/commands/changelog.md`.
+
 ## Publish With Git
 
 Preview the Git actions first:
