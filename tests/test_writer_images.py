@@ -7,6 +7,7 @@ from dochive.writer import (
     _collapse_inline_icon_images,
     _is_inline_icon_asset,
     _render_image,
+    _split_inline_paragraph_images,
     write_mirror,
 )
 
@@ -93,9 +94,140 @@ def test_is_inline_icon_asset_respects_threshold() -> None:
     config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"), image_inline_max_px=48)
     assert _is_inline_icon_asset(Asset("https://example.com/a.png", "images", width=25, height=20), config)
     assert not _is_inline_icon_asset(Asset("https://example.com/b.png", "images", width=120, height=80), config)
+    assert not _is_inline_icon_asset(Asset("https://example.com/c.png", "images", width=50, height=20), config)
+
+    default = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
+    assert _is_inline_icon_asset(Asset("https://example.com/c.png", "images", width=50, height=20), default)
 
     disabled = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"), image_inline_max_px=None)
     assert not _is_inline_icon_asset(Asset("https://example.com/a.png", "images", width=25, height=20), disabled)
+
+
+def test_split_inline_paragraph_images_splits_icon_in_sentence() -> None:
+    image_tag = (
+        '<image src="./lm_p_01_31x30-e324f20148bc.png" crop="0,0,100,100" '
+        'width="31px" height="30px" float="left"/>'
+    )
+    markdown = f"При нажатии на плитку {image_tag} на панели быстрого доступа, отображаются все разделы."
+    split = _split_inline_paragraph_images(markdown)
+    lines = split.splitlines()
+    assert lines == [
+        "При нажатии на плитку",
+        "",
+        image_tag,
+        "",
+        "на панели быстрого доступа, отображаются все разделы.",
+    ]
+
+
+def test_split_inline_paragraph_images_splits_list_item_icon_and_text() -> None:
+    markdown = (
+        '  * <image src="./31.png" crop="0,0,100,100" width="25px" height="20px" '
+        'float="left"/> [Service request](req.htm) (SR) – definition text.'
+    )
+    split = _split_inline_paragraph_images(markdown)
+    lines = split.splitlines()
+    assert len(lines) == 2
+    assert lines[0].endswith('float="left"/> ')
+    assert lines[1] == " [Service request](req.htm) (SR) – definition text."
+
+
+def test_split_inline_paragraph_images_leaves_single_icon_list_line_unchanged() -> None:
+    markdown = '  * <image src="./31.png" crop="0,0,100,100" width="25px" height="20px" float="left"/> '
+    assert _split_inline_paragraph_images(markdown) == markdown
+
+
+def test_split_list_item_with_multiple_icons() -> None:
+    img06 = '<image src="./06.png" crop="0,0,100,100" width="27px" height="20px" float="left"/>'
+    img07 = '<image src="./07.png" crop="0,0,100,100" width="16px" height="20px" float="left"/>'
+    img08 = '<image src="./08.png" crop="0,0,100,100" width="18px" height="20px" float="left"/>'
+    markdown = f"  * {img06} {img07} {img08} Объект управления – текст."
+    split = _split_inline_paragraph_images(markdown)
+    lines = split.splitlines()
+    assert lines[0] == f"  * {img06} "
+    assert lines[1] == f"  {img07}"
+    assert lines[2] == f"  {img08}"
+    assert lines[3] == "  Объект управления – текст."
+
+
+def test_split_list_continuation_with_icon_and_text() -> None:
+    img07 = '<image src="./07.png" crop="0,0,100,100" width="16px" height="20px" float="left"/>'
+    img08 = '<image src="./08.png" crop="0,0,100,100" width="18px" height="20px" float="left"/>'
+    markdown = f"  {img07} {img08} Объект управления – текст."
+    split = _split_inline_paragraph_images(markdown)
+    lines = split.splitlines()
+    assert lines == [f"  {img07}", f"  {img08}", "  Объект управления – текст."]
+
+
+def test_collapse_handles_50px_icon_after_empty_list_marker() -> None:
+    config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
+    markdown = "\n".join(
+        [
+            "  * ",
+            "",
+            '<image src="./05.png" crop="0,0,100,100" scale="100" width="50px" height="20px" float="center"/>',
+            "",
+            "Правило – элемент настройки услуг.",
+        ]
+    )
+    collapsed = _collapse_inline_icon_images(markdown, config)
+    lines = collapsed.splitlines()
+    assert lines[0] == '  * <image src="./05.png" crop="0,0,100,100" width="50px" height="20px" float="left"/> '
+    assert lines[1] == "  Правило – элемент настройки услуг."
+    assert "scale=" not in collapsed
+    assert 'float="center"' not in collapsed
+
+
+def test_split_inline_paragraph_images_handles_multiple_icons() -> None:
+    first = '<image src="./a.png" width="25px" height="20px" float="left"/>'
+    second = '<image src="./b.png" width="24px" height="20px" float="left"/>'
+    markdown = f"Текст1 {first} текст2 {second} текст3"
+    split = _split_inline_paragraph_images(markdown)
+    lines = split.splitlines()
+    assert lines == [
+        "Текст1",
+        "",
+        first,
+        "",
+        "текст2",
+        "",
+        second,
+        "",
+        "текст3",
+    ]
+
+
+def test_write_mirror_splits_paragraph_icons(tmp_path: Path) -> None:
+    page_url = "https://example.com/docs/page.htm"
+    icon = Asset(
+        source="https://example.com/docs/lm_p_01.png",
+        kind="images",
+        local_path="docs/page/lm_p_01.png",
+        width=31,
+        height=30,
+    )
+    markdown = (
+        "При нажатии на плитку "
+        "![tile](https://example.com/docs/lm_p_01.png) "
+        "на панели быстрого доступа, отображаются все разделы."
+    )
+    root = write_mirror(
+        [
+            Page(
+                source_url=page_url,
+                canonical_url=page_url,
+                title="Page",
+                markdown=markdown,
+                depth=0,
+                assets=[icon],
+            )
+        ],
+        MirrorConfig(source=page_url, out_dir=tmp_path),
+    )
+    body = (root / "docs" / "page.md").read_text(encoding="utf-8").split("---", 2)[2]
+    assert "При нажатии на плитку\n\n<image src=" in body
+    assert 'float="left"/>\n\nна панели быстрого доступа' in body
+    assert "![tile]" not in body
 
 
 def test_write_mirror_formats_icon_images_for_gramax_lists(tmp_path: Path) -> None:
@@ -136,4 +268,62 @@ def test_write_mirror_formats_icon_images_for_gramax_lists(tmp_path: Path) -> No
         'float="left"/> ' in body and "\n [Service request]" in body
     )
     assert "scale=" not in body
+    assert 'float="center"' not in body
+
+
+def test_write_mirror_process_description_icons(tmp_path: Path) -> None:
+    page_url = "https://example.com/docs/process_description.htm"
+    icons = [
+        Asset(
+            source=f"https://example.com/docs/{name}.png",
+            kind="images",
+            local_path=f"docs/process_description/{name}.png",
+            width=width,
+            height=height,
+        )
+        for name, width, height in [
+            ("05_50x20", 50, 20),
+            ("06_27x20", 27, 20),
+            ("07_16x20", 16, 20),
+            ("08_18x20", 16, 20),
+        ]
+    ]
+    markdown = "\n".join(
+        [
+            "  * ",
+            "",
+            "![rule](https://example.com/docs/05_50x20.png)",
+            "",
+            "Правило – элемент настройки услуг.",
+            (
+                "  * ![06](https://example.com/docs/06_27x20.png) "
+                "![07](https://example.com/docs/07_16x20.png) "
+                "![08](https://example.com/docs/08_18x20.png) "
+                "Объект управления – процессная активность."
+            ),
+        ]
+    )
+    root = write_mirror(
+        [
+            Page(
+                source_url=page_url,
+                canonical_url=page_url,
+                title="Process description",
+                markdown=markdown,
+                depth=0,
+                assets=icons,
+            )
+        ],
+        MirrorConfig(source=page_url, out_dir=tmp_path),
+    )
+    body = (root / "docs" / "process_description.md").read_text(encoding="utf-8").split("---", 2)[2]
+    for line in body.splitlines():
+        if "<image" not in line.lower():
+            continue
+        tag_end = line.lower().rfind("/>")
+        assert tag_end != -1
+        assert not line[tag_end + 2 :].strip(), f"text after image tag: {line!r}"
+    assert '  * <image src="./process_description/05_50x20.png"' in body
+    assert "  Правило – элемент настройки услуг." in body
+    assert "Объект управления – процессная активность." in body
     assert 'float="center"' not in body

@@ -57,3 +57,9 @@ Placeholder в Markdown: заголовок + «Раздел ожидает от
 - < ~50 страниц в ветке → один mirror.
 - ~50–300 → mirror по URL верхних узлов TOC, тот же `--out`.
 - > ~300 → те же ветки + `--max-pages` 80–150, повтор до заполнения placeholders.
+
+## Partial mirror (с 0.2.4)
+
+- Повторные прогоны в тот же `--out` сохраняют уже записанные разделы и каталог.
+- Переписывание internal links использует `_catalog/pages.yaml` целиком, не только URL текущего crawl.
+- CLI печатает прогресс на stderr (`Reading catalog...`, `Writing N pages...`, …).

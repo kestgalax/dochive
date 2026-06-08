@@ -120,7 +120,9 @@ async def _crawl_web_async(config: MirrorConfig) -> MirrorRun:
         **run_config_kwargs,
     )
 
-    async with AsyncWebCrawler(config=browser_config) as crawler:
+    crawler = AsyncWebCrawler(config=browser_config)
+    await crawler.start()
+    try:
         if _uses_madcap_structure(config):
             structure_run = discover_madcap_structure(config)
             if structure_run.entries:
@@ -159,8 +161,30 @@ async def _crawl_web_async(config: MirrorConfig) -> MirrorRun:
             allowed_prefixes=allowed_prefixes,
         )
         issues.extend(page_issues)
+        return MirrorRun(pages=pages, issues=issues)
+    finally:
+        await _close_crawler(crawler)
 
-    return MirrorRun(pages=pages, issues=issues)
+
+async def _close_crawler(crawler: object, *, timeout: float = 45.0) -> None:
+    close = getattr(crawler, "close", None)
+    if not callable(close):
+        return
+    try:
+        await asyncio.wait_for(close(), timeout=timeout)
+    except asyncio.TimeoutError:
+        pass
+    await _cancel_pending_asyncio_tasks()
+
+
+async def _cancel_pending_asyncio_tasks() -> None:
+    current = asyncio.current_task()
+    pending = [task for task in asyncio.all_tasks() if task is not current and not task.done()]
+    if not pending:
+        return
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
 
 
 async def _build_web_structure_async(config: MirrorConfig) -> StructureRun:
@@ -188,7 +212,9 @@ async def _build_web_structure_async(config: MirrorConfig) -> StructureRun:
         **run_config_kwargs,
     )
 
-    async with AsyncWebCrawler(config=browser_config) as crawler:
+    crawler = AsyncWebCrawler(config=browser_config)
+    await crawler.start()
+    try:
         nav_index, issues = await _build_navigation_index(
             crawler,
             run_config,
@@ -198,8 +224,9 @@ async def _build_web_structure_async(config: MirrorConfig) -> StructureRun:
             root_nav_path=root_nav_path,
             allowed_prefixes=allowed_prefixes,
         )
-
-    return StructureRun(entries=_navigation_entries_to_structure(nav_index, root_url=root_url), issues=issues)
+        return StructureRun(entries=_navigation_entries_to_structure(nav_index, root_url=root_url), issues=issues)
+    finally:
+        await _close_crawler(crawler)
 
 
 def _structure_root_fetch_url(source: str) -> str:

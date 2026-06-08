@@ -12,6 +12,47 @@
 - Установщики `setup.sh` и `setup.bat` (как у pochemuchka) для OpenCode, Claude Code, Codex и Cursor.
 - Скрипт `skills/dochive-mirror-verify/scripts/check_mirror.sh` для проверки placeholders, `errors.yaml` и утечек ссылок на live-site.
 
+## [0.2.4] — 2026-06-08
+
+Ветка `fix/incremental-cross-section-links`: переписывание ссылок и сохранение каталога при порционном mirror.
+
+### Fixed
+
+- При partial mirror внутренние ссылки переписываются на страницы, уже записанные в `_catalog/pages.yaml`, а не только на URL текущего прогона (например ссылки из introduction на QuickStart после отдельного зеркалирования разделов).
+- Partial mirror больше не заменяет ранее зеркалированные разделы placeholder-markdown при зеркалировании другой ветки TOC в ту же output directory.
+- Регрессия, при которой merge catalog paths расширял `sync_roots` на весь mirror и выбрасывал записи других разделов из `_catalog/pages.yaml`.
+
+### Changed
+
+- `dochive mirror` выводит пошаговый прогресс в stderr (`Reading catalog...`, `Writing N pages...`, `Updating catalog...` и связанные этапы).
+- При partial sync обновляются `_index.yaml` только в пределах текущего sync scope, а не всего дерева mirror.
+- Завершение Crawl4AI явно закрывает браузер с таймаутом; локализованные изображения не скачиваются повторно, если файл уже есть на диске.
+- Загрузка ассетов использует таймаут URL 30 секунд.
+
+### Added
+
+- Тесты в `tests/test_writer_links.py` на переписывание cross-section ссылок и сохранение каталога и файлов при partial mirror.
+
+## [0.2.3] — 2026-06-08
+
+Ветка `fix/madcap-spoiler-podrobnee`: восстановление спойлеров MadCap «Подробнее» в выводе Gramax.
+
+### Fixed
+
+- Ссылки MadCap `MCDropDown` «Подробнее» (`[Подробнее](#)` после переписывания — на текущую страницу) снова распознаются и превращаются в блоки Gramax `<details>` / `<summary>` вместо самоссылки на ту же страницу (например пункты листа изменений Naumen NSD Pro `stable-26`).
+
+## [0.2.2] — 2026-06-08
+
+Ветка `fix/gramax-inline-paragraph-images`: отступы вокруг inline-иконок в абзацном тексте для Gramax.
+
+### Changed
+
+- `docs/USAGE.md` / `docs/USAGE.ru.md`: описан блочный вывод мелких иконок в абзацном тексте; иконки в пунктах списка по-прежнему остаются inline.
+
+### Fixed
+
+- Мелкие иконки MadCap, встроенные в середину предложения абзаца, выносятся на отдельную строку `<image>` с пустыми строками до и после — Gramax корректно их отображает (например плитки на страницах быстрого старта Naumen NSD Pro). Иконки в пунктах списка сохраняют прежний inline-формат.
+
 ## [0.2.1] — 2026-06-04
 
 Ветка `fix/madcap-tables-comments-colwidth`: восстановление MadCap-таблиц, примечания Gramax и заголовки страниц из HTML.
@@ -20,7 +61,7 @@
 
 - Конвертация исходных HTML-таблиц в блоки Gramax `{% table %}` с `{% colwidth=[…] %}` на каждую ячейку (256 px по умолчанию, 512 px для широких колонок); таблицы с `rowspan`/`colspan` остаются в HTML.
 - Замена «рваных» pipe-таблиц Crawl4AI на очищенные таблицы из HTML; поглощение осиротевших буллетов, вырванных из ячеек.
-- Преобразование абзацев MadCap `<p class="comment">` в callout Gramax `:::note:true` при web-mirror.
+- Преобразование абзацев MadCap `<p class="comment">` в callout Gramax `:::note:false` при web-mirror.
 - Вставка заголовков разделов MadCap `<h2>` непосредственно перед каждым восстановленным блоком `{% table %}`.
 - Использование текста HTML `<title>` или `<h1>` в метаданных страницы, когда Crawl4AI или навигация дают укороченную метку.
 

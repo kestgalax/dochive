@@ -101,7 +101,7 @@ class MirrorConfig:
     image_render_mode: str = "html"
     image_size_mode: str = "intrinsic"
     image_max_width: int | None = None
-    image_inline_max_px: int | None = 48
+    image_inline_max_px: int | None = 52
     anti_bot_mode: str = "basic"
     structure_mode: str = "auto"
     source_type: str = "auto"

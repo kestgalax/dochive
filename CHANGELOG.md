@@ -12,6 +12,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `setup.sh` and `setup.bat` installers (pochemuchka-style) for OpenCode, Claude Code, Codex, and Cursor.
 - `skills/dochive-mirror-verify/scripts/check_mirror.sh` for automated placeholder, error, and live-site link-leak checks.
 
+## [0.2.4] — 2026-06-08
+
+Branch `fix/incremental-cross-section-links`: incremental partial mirror link rewrite and catalog preservation.
+
+### Fixed
+
+- Partial mirror runs rewrite internal links to pages already recorded in `_catalog/pages.yaml`, not only URLs crawled in the current run (for example introduction links to QuickStart after mirroring sections separately).
+- Partial mirror no longer replaces previously mirrored sections with placeholder markdown when a different TOC branch is mirrored into the same output directory.
+- Regression where catalog path merge expanded `sync_roots` to the entire mirror and dropped out-of-scope entries from `_catalog/pages.yaml`.
+
+### Changed
+
+- `dochive mirror` prints incremental progress on stderr (`Reading catalog...`, `Writing N pages...`, `Updating catalog...`, and related steps).
+- Partial sync refreshes folder `_index.yaml` files only within the current sync scope instead of the full mirror tree.
+- Crawl4AI shutdown closes the browser explicitly with a timeout; localized image assets are skipped when the target file already exists on disk.
+- Asset downloads use a 30-second URL timeout.
+
+### Added
+
+- Tests in `tests/test_writer_links.py` for cross-section link rewrite and partial-mirror catalog and disk preservation.
+
+## [0.2.3] — 2026-06-08
+
+Branch `fix/madcap-spoiler-podrobnee`: restore MadCap «Подробнее» spoiler blocks in Gramax output.
+
+### Fixed
+
+- MadCap `MCDropDown` «Подробнее» links (`[Подробнее](#)` rewritten to the current page) are recognized again and rendered as Gramax `<details>` / `<summary>` blocks instead of a self-link on the same page (for example change-list entries on Naumen NSD Pro `stable-26`).
+
+## [0.2.2] — 2026-06-08
+
+Branch `fix/gramax-inline-paragraph-images`: Gramax-safe spacing for inline icons in paragraph text.
+
+### Changed
+
+- `docs/USAGE.md` / `docs/USAGE.ru.md`: document block spacing for small icons in paragraph text; list-item icons still use the inline list layout.
+
+### Fixed
+
+- Small MadCap icons embedded mid-sentence in paragraph text are split onto their own `<image>` line with blank lines before and after, so Gramax renders them correctly (for example tile icons on Naumen NSD Pro quick-start pages). List-item icons keep the existing inline list layout.
+
 ## [0.2.1] — 2026-06-04
 
 Branch `fix/madcap-tables-comments-colwidth`: MadCap table recovery, Gramax notes, and page titles from HTML.
@@ -20,7 +61,7 @@ Branch `fix/madcap-tables-comments-colwidth`: MadCap table recovery, Gramax note
 
 - Convert source HTML tables into Gramax `{% table %}` blocks with per-cell `{% colwidth=[…] %}` (256 px default, 512 px for wide columns); keep `rowspan`/`colspan` tables as HTML fallback.
 - Replace lossy Crawl4AI pipe tables with cleaned HTML tables; absorb orphan list bullets that belonged inside table cells.
-- Map MadCap `<p class="comment">` paragraphs to Gramax `:::note:true` callouts during web mirror.
+- Map MadCap `<p class="comment">` paragraphs to Gramax `:::note:false` callouts during web mirror.
 - Insert MadCap `<h2>` section titles immediately before each recovered Gramax table block.
 - Use the HTML `<title>` or `<h1>` text for mirrored page metadata when Crawl4AI or navigation labels are shorter than the document title.
 

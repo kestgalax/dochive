@@ -380,7 +380,7 @@ def inject_html_comments(markdown: str, html: str) -> str:
         replaced = False
         for comment in comments:
             if _line_matches_comment_text(line, comment):
-                output.append(":::note:true")
+                output.append(":::note:false")
                 output.append(comment)
                 output.append(":::")
                 replaced = True
