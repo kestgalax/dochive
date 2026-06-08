@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     mirror.add_argument(
         "--image-inline-max-px",
         type=int,
-        default=48,
+        default=52,
         help="Keep images at or below this size inline (for list icons). Use 0 to disable.",
     )
     mirror.add_argument(
