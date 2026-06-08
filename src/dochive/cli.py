@@ -219,7 +219,9 @@ def mirror_command(args: argparse.Namespace) -> int:
     config = _mirror_config_from_args(args)
 
     try:
+        print("Crawling...", file=sys.stderr, flush=True)
         run = crawl_web(config) if is_url(config.source) else crawl_local_html(config)
+        print(f"Crawled {len(run.pages)} pages. Writing mirror...", file=sys.stderr, flush=True)
         root = write_mirror(run.pages, config, issues=run.issues)
     except Exception as exc:  # pragma: no cover - CLI boundary
         print(f"error: {exc}", file=sys.stderr)

@@ -4,6 +4,27 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.4] — 2026-06-08
+
+Branch `fix/incremental-cross-section-links`: incremental partial mirror link rewrite and catalog preservation.
+
+### Fixed
+
+- Partial mirror runs rewrite internal links to pages already recorded in `_catalog/pages.yaml`, not only URLs crawled in the current run (for example introduction links to QuickStart after mirroring sections separately).
+- Partial mirror no longer replaces previously mirrored sections with placeholder markdown when a different TOC branch is mirrored into the same output directory.
+- Regression where catalog path merge expanded `sync_roots` to the entire mirror and dropped out-of-scope entries from `_catalog/pages.yaml`.
+
+### Changed
+
+- `dochive mirror` prints incremental progress on stderr (`Reading catalog...`, `Writing N pages...`, `Updating catalog...`, and related steps).
+- Partial sync refreshes folder `_index.yaml` files only within the current sync scope instead of the full mirror tree.
+- Crawl4AI shutdown closes the browser explicitly with a timeout; localized image assets are skipped when the target file already exists on disk.
+- Asset downloads use a 30-second URL timeout.
+
+### Added
+
+- Tests in `tests/test_writer_links.py` for cross-section link rewrite and partial-mirror catalog and disk preservation.
+
 ## [0.2.3] — 2026-06-08
 
 Branch `fix/madcap-spoiler-podrobnee`: restore MadCap «Подробнее» spoiler blocks in Gramax output.
