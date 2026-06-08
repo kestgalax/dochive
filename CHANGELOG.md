@@ -12,6 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `setup.sh` and `setup.bat` installers (pochemuchka-style) for OpenCode, Claude Code, Codex, and Cursor.
 - `skills/dochive-mirror-verify/scripts/check_mirror.sh` for automated placeholder, error, and live-site link-leak checks.
 
+### Changed
+
+- Agent skills: preflight step, greenfield/incremental/refresh/verify-only modes, `--out` vs `mirror_root` guidance, and warnings against `--structure-mode links` on existing MadCap mirrors; reinstall with `./setup.sh --target cursor --force` after `git pull`.
+- Short agent skills guide: `docs/SKILLS.md` / `docs/SKILLS.ru.md`.
+
 ## [0.2.4] — 2026-06-08
 
 Branch `fix/incremental-cross-section-links`: incremental partial mirror link rewrite and catalog preservation.

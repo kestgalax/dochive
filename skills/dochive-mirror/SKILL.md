@@ -1,42 +1,64 @@
 ---
 name: dochive-mirror
-description: Оркестрирует зеркалирование документации через Dochive — structure, выбор стратегии по объёму, mirror, verify. Используй при «зеркалируй документацию», URL + --out, dochive mirror, MadCap/Naumen WebHelp, Wiki.js, частичное зеркало по разделам.
+description: Оркестрирует зеркалирование документации через Dochive — preflight, режимы (с нуля / догрузка / обновление), mirror, verify. Используй при «зеркалируй документацию», URL + --out, dochive mirror, MadCap/Naumen WebHelp, Wiki.js, частичное зеркало по разделам.
 disable-model-invocation: true
 ---
 
 # Dochive Mirror
 
-Навык управляет полным циклом зеркалирования HTML-документации в Markdown-first репозиторий с помощью CLI [Dochive](https://github.com/kestgalax/dochive). После каждого прогона `mirror` обязательно применяй навык **dochive-mirror-verify** (или его чеклист).
+Навык управляет зеркалированием HTML-документации в Markdown-first репозиторий через CLI [Dochive](https://github.com/kestgalax/dochive). Работа бывает **с нуля**, **догрузкой раздела** или **обновлением** уже зеркалированной страницы — не предполагай greenfield по умолчанию.
 
-Подробные флаги CLI: [reference.md](reference.md). Примеры: [examples.md](examples.md).
+Подробные флаги: [reference.md](reference.md). Примеры: [examples.md](examples.md).
 
 ## Когда включать
 
-- Пользователь дал URL документации и хочет локальное зеркало (Gramax/Markdown).
-- Нужно спланировать зеркалирование большого сайта по разделам или за один прогон.
-- Повторное дозеркалирование в тот же `--out` с сохранением путей.
+- Пользователь дал URL и хочет зеркало (Gramax/Markdown).
+- Нужно догрузить placeholder, обновить страницу или спланировать зеркало с нуля.
+- Повторное зеркалирование в тот же `--out` с сохранением путей.
+
+## Режимы работы
+
+Выбери режим **до** любых команд (после preflight, шаг 0.5):
+
+| Режим | Когда | Что делать |
+|-------|-------|------------|
+| **Greenfield** | Нет `<mirror_root>/_catalog/` | `structure` → `mirror` по объёму |
+| **Incremental fill** | Каталог есть, цель `placeholder: true` | **Только** `mirror`; `structure` не трогать |
+| **Refresh** | Каталог есть, цель `placeholder: false`, пользователь хочет перекачать | `mirror` только с явным согласием |
+| **Verify-only** | Страница готова (`placeholder: false`), задача — проверка | Только **dochive-mirror-verify**; mirror не запускать |
 
 ## Вход
 
-Собери перед стартом:
+1. **URL** (`--source`) — страница, ветка TOC или корень.
+2. **`--out`** — **родительский** каталог вывода (`./mirror`), не `mirror_root`.
+3. **Цель** — greenfield / догрузка / refresh / verify.
+4. **Права** — Responsible Use в README.
 
-1. **URL** (`--source`) — стартовая страница или корень ветки.
-2. **`--out`** — каталог вывода (спроси, если не указан; не меняй между прогонами одного зеркала).
-3. **Цель** — вся ветка TOC / один раздел / пробный smoke.
-4. **Права** — напомни про Responsible Use в README: копирование чужой документации только при наличии прав.
+## Структура `--out` (критично)
+
+CLI **всегда** создаёт подкаталог с именем домена:
+
+```text
+--out ./mirror                    ← передаёшь в mirror/structure
+  └── www.naumen.ru/              ← mirror_root (catalog, verify, чтение каталогов)
+        └── _catalog/
+        └── docs/...
+```
+
+| Переменная | Пример | Назначение |
+|------------|--------|------------|
+| `--out` | `./mirror` | Аргумент CLI |
+| `mirror_root` | `./mirror/www.naumen.ru` | `dochive catalog --root`, verify, чтение `pages.yaml` |
+
+**Ошибка:** `--out ./mirror/www.naumen.ru` → вложенный `www.naumen.ru/www.naumen.ru/`. Если внутри `mirror_root` снова появился `_catalog` во вложенном домене — **стоп**, исправь `--out`.
 
 ## Шаг 0. Окружение
 
-Из корня репозитория dochive (или после `pip install dochive`):
-
 ```bash
 python -m pip install -e .
-# для web + JS:
 python -m pip install -e ".[crawl4ai]"
 playwright install chromium
 ```
-
-Для web crawl задай (см. `docs/USAGE.md`):
 
 ```bash
 export CRAWL4_AI_BASE_DIRECTORY="$PWD/.crawl4ai-data"
@@ -44,60 +66,78 @@ export PLAYWRIGHT_BROWSERS_PATH="$PWD/.playwright-browsers"
 export PYTHONIOENCODING=utf-8
 ```
 
-Предпочитай `python -m dochive` из repo root при разработке — так используется актуальный код.
+Предпочитай `python -m dochive` из repo root.
+
+## Шаг 0.5. Preflight (обязательный)
+
+Выполни **до** `structure` или `mirror`:
+
+1. **Разреши пути:** `--out` = родитель; `mirror_root` = `<out>/<domain>/`.
+2. **Проверь каталог:** есть ли `mirror_root/_catalog/pages.yaml`?
+3. **Найди целевую страницу** в `pages.yaml` или frontmatter `.md` (по `canonical_url` / `path` из `structure.yaml`):
+   - `placeholder: false` и пользователь не просил refresh → **Verify-only**, mirror не запускать.
+   - `placeholder: true` → **Incremental fill**.
+   - Нет каталога → **Greenfield**.
+4. **Baseline** (запиши для verify после прогона): `summary.yaml` → `counts.pages`; при наличии — `sync.yaml` → counts.
+5. **MadCap:** если `structure.yaml` уже есть — **не** запускай `dochive structure` без явного запроса «пересобрать TOC».
+
+## Красные флаги (STOP)
+
+- `--structure-mode links` на **существующем** MadCap-зеркале (для `mirror` и `structure`) — игнорирует TOC, ломает каталог.
+- `dochive structure` на существующем зеркале без запроса пересборки — перезаписывает `structure.yaml`.
+- `--out` указывает на `mirror_root`, а не на родительский каталог.
+- Запуск mirror, когда preflight показал `placeholder: false` без запроса refresh.
 
 ## Шаг 1. Классификация источника
 
-| Признак | Тип | Режим structure |
-|--------|-----|-----------------|
-| URL содержит `/Content/` и рядом доступен `{webhelp}/Data/HelpSystem.xml` | MadCap WebHelp | `--structure-mode auto` (или `toc`) |
-| Extensionless Wiki URL, `/ru/`, login/tag в соседних ссылках | Wiki.js | `auto` или `links` |
-| Локальный `.html` / каталог | Локальный | `structure` не нужен, сразу `mirror` |
+| Признак | Тип | structure-mode (MadCap) |
+|--------|-----|-------------------------|
+| `/Content/` + `HelpSystem.xml` | MadCap WebHelp | `auto` или `toc`; на существующем зеркале **не** `links` |
+| Extensionless Wiki URL | Wiki.js | `auto` или `links` (greenfield) |
+| Локальный HTML | Локальный | `structure` не нужен |
 | Confluence + токен | Confluence | `--source-type confluence --auth bearer` |
 
-**Проба MadCap (без полного mirror):** из URL `.../Content/page.htm` выведи webhelp root (всё до `/Content/`) и проверь HEAD/GET на `{root}/Data/HelpSystem.xml`.
+Не используй `--scope domain` без согласия пользователя.
 
-**Проба Wiki.js:** extensionless path, языковой префикс — см. `url_utils` / `markdown_normalizer` в репозитории dochive.
+## Шаг 2. Обнаружение структуры (только Greenfield)
 
-Не используй `--scope domain` без явного согласия пользователя.
-
-## Шаг 2. Обнаружение структуры (web)
-
-Всегда для web-документации со стабильным TOC:
+**Не** запускай для incremental fill / refresh / verify-only.
 
 ```bash
 dochive structure \
   --source "<URL>" \
-  --out "<OUT>" \
+  --out "<OUT_PARENT>" \
   --scope subtree \
   --structure-mode auto \
   --max-depth <3-10> \
   --max-pages <500-2000>
 ```
 
-Добавь `--include-url-prefix` для shared-страниц вне subtree. Для Confluence — флаги auth из reference.
+Результат: `mirror_root/_catalog/structure.yaml`.
 
-Результат: `<OUT>/<source_root>/_catalog/structure.yaml` с деревом, `placeholder`, `fetch_url`, Gramax paths.
+Пересборка TOC на существующем зеркале — только по явному запросу пользователя; предупреди о риске.
 
-## Шаг 3. План зеркалирования по объёму
+## Шаг 3. План зеркалирования
 
-Прочитай `structure.yaml` (и при необходимости `pages.yaml`). Подсчитай записи с `placeholder: true` и общее число страниц в ветке.
+Прочитай `structure.yaml` / `pages.yaml` для целевой ветки.
 
 | Размер ветки | Стратегия |
 |--------------|-----------|
-| **Малый** (< ~50 страниц) | Один `dochive mirror` с тем же `--source`, `--out`, `--scope subtree` |
-| **Средний** (~50–300) | По **дочерним корням TOC**: для каждой верхней ветки отдельный `--source` = URL узла, **тот же `--out`** |
-| **Большой** (> ~300 или таймауты) | Те же ветки + `--max-pages` 80–150 за прогон; повторять mirror, пока placeholders не исчезнут |
-| **Smoke / одна страница** | `--max-depth 1 --max-pages 1` с URL конкретной TOC-страницы (с `?tocpath=...` для MadCap); тот же `--out` |
+| **Малый** (< ~50) | Один `mirror`, тот же `--out` |
+| **Средний** (~50–300) | Mirror по URL верхних узлов TOC, тот же `--out` |
+| **Большой** (> ~300) | Ветки + `--max-pages` 80–150, повтор до заполнения placeholders |
+| **Smoke / одна страница** | `--max-depth 1 --max-pages 1`, URL с `?tocpath=...` (MadCap) |
 
-Если `_catalog/structure.yaml` уже есть в `--out` — **не перезапускай** `structure` без необходимости; сразу `mirror` по нужному `--source`.
+### Листовая TOC-страница (без детей)
 
-Рекомендуемые флаги mirror (web):
+Если у узла в `structure.yaml` нет `children` — зеркалируется **одна** страница. Это нормально; не ожидай подстраниц.
+
+### Рекомендуемые флаги mirror (web, существующее MadCap-зеркало)
 
 ```bash
 dochive mirror \
   --source "<URL>" \
-  --out "<OUT>" \
+  --out "<OUT_PARENT>" \
   --scope subtree \
   --structure-mode auto \
   --render-js \
@@ -107,41 +147,29 @@ dochive mirror \
   --image-max-width 900
 ```
 
-Добавь `videos` в `--save-assets`, если на сайте есть `<video>`. Уточни `--content-selector` / `--exclude-selector`, если контент в узком контейнере.
+Smoke на существующем зеркале: добавь `--max-depth 1 --max-pages 1`; **не** используй `--structure-mode links`.
 
 **Жёсткие правила:**
 
-- Не меняй `--out` между прогонами одного зеркала.
-- Placeholders заполняются при mirror того же URL из structure — пути файлов остаются стабильными.
-- Partial mirror **не затирает** уже зеркалированные разделы при смене ветки TOC в том же `--out`; внутренние ссылки переписываются по `_catalog/pages.yaml`, в том числе на страницы из других прогонов (cross-section links, с 0.2.4).
-- CLI печатает прогресс на **stderr** (`Reading catalog...`, `Writing N pages...`, `Updating catalog...`) — это нормально, не ошибка.
-- Повторная загрузка уже существующих image-файлов на диске пропускается (0.2.4).
-- После **каждого** прогона mirror → **dochive-mirror-verify** (включая smoke с `--max-pages 1`).
+- Не меняй `--out` между прогонами.
+- Partial mirror (0.2.4+) не затирает другие разделы; cross-section links из `_catalog/pages.yaml`.
+- Прогресс на stderr — норма.
+- После каждого `mirror` → **dochive-mirror-verify**.
 
-### Partial mirror: что проверить после smoke
+### После incremental / smoke
 
-После догрузки одной TOC-страницы (например `sd/sd.htm`):
+1. Целевой `.md` — `placeholder: false`.
+2. Соседний раздел (например `introduction/_index.md`) — всё ещё `placeholder: false`.
+3. `sync.yaml` — без массового `deleted`.
+4. Cross-section ссылки — относительные пути, не live doc-host.
 
-1. Целевой `.md` — `placeholder: false`, нет stub «Раздел ожидает отдельного зеркалирования».
-2. **Соседний уже зеркалированный раздел** (например `introduction/_index.md`) — по-прежнему `placeholder: false`, тело не затёрто.
-3. `_catalog/sync.yaml` — осмысленный `changed`/`added`, **без** массовых `deleted`.
-4. Ссылки с новой страницы на уже зеркалированные разделы — относительные пути в mirror, не `https://...` doc-host.
+## Шаг 4. Отчёт
 
-## Шаг 4. Отчёт пользователю
-
-Кратко сообщи:
-
-- Тип источника (MadCap / Wiki / local / Confluence).
-- Выбранную стратегию и число прогонов.
-- Путь mirror root (`dochive catalog --root ...`).
-- Результат verify: placeholders, errors, утечки ссылок на live-site.
-- Следующий шаг, если verify не прошёл (какая ветка TOC / какие флаги поменять).
+Сообщи: режим (greenfield / incremental / refresh / verify-only), `--out` vs `mirror_root`, стратегию, результат verify, следующий шаг.
 
 ## Связанные команды
 
 ```bash
-dochive catalog --root <mirror_site_root>
-dochive query --root <mirror_site_root> --text "..." --limit 5
+dochive catalog --root <mirror_root>
+dochive query --root <mirror_root> --text "..." --limit 5
 ```
-
-При публикации зеркала в Git — `dochive publish` (отдельная задача, не часть mirror).

@@ -140,10 +140,13 @@ cp -r skills/dochive-mirror .cursor/skills/
 cp -r skills/dochive-mirror-verify .cursor/skills/
 ```
 
-Skills: **dochive-mirror** (structure → mirror plan → run) and **dochive-mirror-verify** (catalog checks + `skills/dochive-mirror-verify/scripts/check_mirror.sh`).
+Skills: **dochive-mirror** (preflight → mode → mirror) and **dochive-mirror-verify** (catalog checks + `check_mirror.sh`). Full guide: [docs/SKILLS.md](docs/SKILLS.md).
+
+Agents run preflight on existing mirrors and pick greenfield, incremental fill, or verify-only. After `git pull`, reinstall: `./setup.sh --target cursor --force`.
 
 ## Project Docs
 
+- [Agent Skills](docs/SKILLS.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Usage](docs/USAGE.md)
 - [Usage in Russian](docs/USAGE.ru.md)

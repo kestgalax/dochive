@@ -140,10 +140,13 @@ cp -r skills/dochive-mirror .cursor/skills/
 cp -r skills/dochive-mirror-verify .cursor/skills/
 ```
 
-Навыки: **dochive-mirror** (structure → план → mirror) и **dochive-mirror-verify** (каталоги + `skills/dochive-mirror-verify/scripts/check_mirror.sh`).
+Навыки: **dochive-mirror** (preflight → режим → mirror) и **dochive-mirror-verify** (каталоги + `check_mirror.sh`). Подробный гайд: [docs/SKILLS.ru.md](docs/SKILLS.ru.md).
+
+Перед mirror агент проверяет существующее зеркало (preflight) и выбирает режим: с нуля, догрузка placeholder или только verify. После `git pull` переустановите: `./setup.sh --target cursor --force`.
 
 ## Документация проекта
 
+- [Agent Skills (RU)](docs/SKILLS.ru.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Usage](docs/USAGE.md)
 - [Usage на русском](docs/USAGE.ru.md)

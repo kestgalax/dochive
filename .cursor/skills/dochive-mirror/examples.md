@@ -1,12 +1,15 @@
 # Примеры — dochive-mirror
 
-## MadCap / Naumen NSD Pro (web)
+Пути для Naumen:
 
-Стартовая страница:
+- `--out` = `./mirror`
+- `mirror_root` = `./mirror/www.naumen.ru`
 
-`https://www.naumen.ru/docs/sd/nsdpro/Content/main_page.htm`
+## MadCap / Naumen NSD Pro — greenfield
 
-### 1. Структура
+Старт: `https://www.naumen.ru/docs/sd/nsdpro/Content/main_page.htm`
+
+### 1. Структура (только если нет `mirror_root/_catalog/`)
 
 ```bash
 dochive structure \
@@ -18,9 +21,7 @@ dochive structure \
   --max-pages 2000
 ```
 
-Проверь: `./mirror/<source_root>/_catalog/structure.yaml` — число узлов и `placeholder: true`.
-
-### 2. Mirror (малый subtree — один прогон)
+### 2. Mirror (малый subtree)
 
 ```bash
 dochive mirror \
@@ -35,9 +36,7 @@ dochive mirror \
   --image-max-width 900
 ```
 
-### 3. Mirror по ветке TOC (средний/большой объём)
-
-Возьми `fetch_url` дочернего корня из `structure.yaml`:
+### 3. Mirror по ветке TOC
 
 ```bash
 dochive mirror \
@@ -50,21 +49,40 @@ dochive mirror \
   --save-assets images
 ```
 
-Повтори для каждой верхней ветки; **не меняй** `--out`.
+## Naumen — `sd/sd.htm` (существующее зеркало)
 
-### 4. Verify
+URL:
+
+`https://www.naumen.ru/docs/sd/nsdpro/Content/sd/sd.htm?tocpath=...`
+
+Ожидаемый path: `mirror/www.naumen.ru/docs/sd/nsdpro/content/nsdpro_practices/sd/_index.md`
+
+### Preflight (обязательно)
+
+```bash
+# mirror_root, не --out
+grep -A2 "canonical_url.*sd/sd.htm" ./mirror/www.naumen.ru/_catalog/pages.yaml | head -20
+# или прочитай frontmatter _index.md:
+head -25 ./mirror/www.naumen.ru/docs/sd/nsdpro/content/nsdpro_practices/sd/_index.md
+```
+
+Зафиксируй baseline:
+
+```bash
+grep "pages:" ./mirror/www.naumen.ru/_catalog/summary.yaml
+```
+
+### Сценарий A: страница уже готова (`placeholder: false`)
+
+Mirror **не** запускать. Только verify:
 
 ```bash
 bash skills/dochive-mirror-verify/scripts/check_mirror.sh \
-  --root ./mirror/<source_root> \
+  --root ./mirror/www.naumen.ru \
   --source-host www.naumen.ru
 ```
 
-Или примени навык **dochive-mirror-verify**.
-
-### 5. Smoke: одна TOC-страница (partial mirror)
-
-Когда структура и часть страниц уже есть, догрузить **одну** страницу без перезаписи соседних разделов:
+### Сценарий B: догрузка placeholder (`placeholder: true`)
 
 ```bash
 python3 -m dochive mirror \
@@ -74,15 +92,24 @@ python3 -m dochive mirror \
   --max-depth 1 \
   --max-pages 1 \
   --scope subtree \
+  --structure-mode auto \
   --anti-bot basic \
   --save-assets images
 ```
 
-Ожидаемый mirror path: `mirror/www.naumen.ru/docs/sd/nsdpro/content/nsdpro_practices/sd/_index.md`.
+**Не** используй `--structure-mode links`. **Не** указывай `--out ./mirror/www.naumen.ru`.
 
-После прогона проверь: целевая страница заполнена; `introduction/_index.md` и другие разделы **не** откатились в placeholder.
+После прогона: `sd/_index.md` заполнен; `introduction/_index.md` не откатился; `sync.yaml` без массового `deleted`.
 
-## Локальный HTML (без structure)
+### Verify
+
+```bash
+bash skills/dochive-mirror-verify/scripts/check_mirror.sh \
+  --root ./mirror/www.naumen.ru \
+  --source-host www.naumen.ru
+```
+
+## Локальный HTML
 
 ```bash
 dochive mirror \
@@ -92,9 +119,7 @@ dochive mirror \
   --save-assets images
 ```
 
-Verify с `--source-host` не нужен, если в теле страниц нет ссылок на внешний doc-host; всё равно проверь `errors.yaml` и placeholders.
-
-## Wiki.js subtree
+## Wiki.js (greenfield)
 
 ```bash
 dochive structure \
@@ -112,12 +137,9 @@ dochive mirror \
   --save-assets images
 ```
 
-## Confluence (защищённый)
+## Confluence
 
 ```bash
-cp .env.example .env
-# DOCHIVE_AUTH_TOKEN=...
-
 dochive mirror \
   --source "https://wiki.example.com/pages/viewpage.action?pageId=123" \
   --out ./mirror \
