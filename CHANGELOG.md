@@ -53,7 +53,7 @@ Branch `fix/madcap-tables-comments-colwidth`: MadCap table recovery, Gramax note
 
 - Convert source HTML tables into Gramax `{% table %}` blocks with per-cell `{% colwidth=[…] %}` (256 px default, 512 px for wide columns); keep `rowspan`/`colspan` tables as HTML fallback.
 - Replace lossy Crawl4AI pipe tables with cleaned HTML tables; absorb orphan list bullets that belonged inside table cells.
-- Map MadCap `<p class="comment">` paragraphs to Gramax `:::note:true` callouts during web mirror.
+- Map MadCap `<p class="comment">` paragraphs to Gramax `:::note:false` callouts during web mirror.
 - Insert MadCap `<h2>` section titles immediately before each recovered Gramax table block.
 - Use the HTML `<title>` or `<h1>` text for mirrored page metadata when Crawl4AI or navigation labels are shorter than the document title.
 
