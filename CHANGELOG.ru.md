@@ -4,6 +4,14 @@
 
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/).
 
+## [0.2.3] — 2026-06-08
+
+Ветка `fix/madcap-spoiler-podrobnee`: восстановление спойлеров MadCap «Подробнее» в выводе Gramax.
+
+### Fixed
+
+- Ссылки MadCap `MCDropDown` «Подробнее» (`[Подробнее](#)` после переписывания — на текущую страницу) снова распознаются и превращаются в блоки Gramax `<details>` / `<summary>` вместо самоссылки на ту же страницу (например пункты листа изменений Naumen NSD Pro `stable-26`).
+
 ## [0.2.2] — 2026-06-08
 
 Ветка `fix/gramax-inline-paragraph-images`: отступы вокруг inline-иконок в абзацном тексте для Gramax.

@@ -45,6 +45,11 @@ GRAMAX_IMAGE_SIZE_RE = re.compile(
 )
 GRAMAX_IMAGE_SCALE_RE = re.compile(r'\s+scale="\d+"')
 INLINE_GRAMAX_IMAGE_TAG_RE = re.compile(r"(<image\b[^>]*/>)", re.IGNORECASE)
+_DETAILS_SUMMARY_LABELS = ("Подробное описание", "Подробнее", "Читать далее")
+_DETAILS_SUMMARY_LINK_RE = re.compile(
+    rf"\[({'|'.join(_DETAILS_SUMMARY_LABELS)})\]\([^)]+\)",
+    re.IGNORECASE,
+)
 LIST_ITEM_LINE_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s")
 MERGED_INLINE_ICON_LIST_RE = re.compile(
     r"^(\s*)(?:[-*])\s+(<image\b[^>]+/>)\s+(.+)$",
@@ -1212,9 +1217,9 @@ def _render_details_sections(markdown: str) -> str:
 
 def _details_summary_text(line: str) -> str | None:
     stripped = line.strip()
-    if match := re.fullmatch(r"\[(Подробное описание|Читать далее)\]\([^)]+\)", stripped, re.IGNORECASE):
+    if match := _DETAILS_SUMMARY_LINK_RE.fullmatch(stripped):
         return match.group(1)
-    if stripped in {"Подробное описание", "Подробнее", "Читать далее"}:
+    if stripped in _DETAILS_SUMMARY_LABELS:
         return stripped
     return None
 
