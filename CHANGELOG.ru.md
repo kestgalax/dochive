@@ -8,7 +8,7 @@
 
 ### Added
 
-- Agent skills `dochive-mirror` и `dochive-mirror-verify` в `skills/`: structure → план зеркалирования по объёму → verify после прогона.
+- Agent skills `dochive-mirror` и `dochive-mirror-verify` в `skills/`: structure → план зеркалирования по объёму → verify после прогона. **Экспериментально:** сценарии пока не проходили полное тестирование на разных сайтах и в средах агентов.
 - Установщики `setup.sh` и `setup.bat` (как у pochemuchka) для OpenCode, Claude Code, Codex и Cursor.
 - Скрипт `skills/dochive-mirror-verify/scripts/check_mirror.sh` для проверки placeholders, `errors.yaml` и утечек ссылок на live-site.
 

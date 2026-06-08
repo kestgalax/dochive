@@ -4,6 +4,8 @@
 
 Skills in [`skills/`](../skills/) help agents (Cursor, Claude Code, OpenCode, etc.) mirror documentation through Dochive safely: **from scratch**, **incremental section fill**, or **verify-only** on an existing mirror.
 
+> **Experimental:** Agent skills are an early feature. Workflows and guidance have not been fully validated across sites and agent runtimes yet; use with caution on production mirrors.
+
 ## Skills
 
 | Skill | Role |

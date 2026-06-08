@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Agent skills `dochive-mirror` and `dochive-mirror-verify` under `skills/` for structure-first mirroring, volume-based run planning, and post-mirror verification.
+- Agent skills `dochive-mirror` and `dochive-mirror-verify` under `skills/` for structure-first mirroring, volume-based run planning, and post-mirror verification. **Experimental:** workflows are not fully tested across sites and agent runtimes yet.
 - `setup.sh` and `setup.bat` installers (pochemuchka-style) for OpenCode, Claude Code, Codex, and Cursor.
 - `skills/dochive-mirror-verify/scripts/check_mirror.sh` for automated placeholder, error, and live-site link-leak checks.
 

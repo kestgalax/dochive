@@ -123,7 +123,7 @@ If HTTPS asset downloads fail with `CERTIFICATE_VERIFY_FAILED`, make sure the cr
 
 ## Agent Skills
 
-Agent skills in `skills/` orchestrate structure discovery, mirroring strategy by volume, and post-run verification (placeholders, `errors.yaml`, live-site link leaks). Pattern follows [pochemuchka](https://github.com/kestgalax/pochemuchka).
+Agent skills in `skills/` orchestrate structure discovery, mirroring strategy by volume, and post-run verification (placeholders, `errors.yaml`, live-site link leaks). Pattern follows [pochemuchka](https://github.com/kestgalax/pochemuchka). **Experimental:** not fully tested across sites and agent runtimes yet.
 
 **Install (pick one):**
 
