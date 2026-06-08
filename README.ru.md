@@ -121,6 +121,27 @@ python -m dochive --help
 
 Если HTTPS asset downloads завершаются с `CERTIFICATE_VERIFY_FAILED`, убедитесь, что crawl запускается в Python environment с настроенными CA certificates. Свежий `.venv`, созданный через Homebrew `python3`, обычно наследует Homebrew certificate bundle; python.org macOS installer также можно исправить через `/Applications/Python 3.x/Install Certificates.command`.
 
+## Agent Skills
+
+В `skills/` лежат навыки для агентов: обнаружение структуры, выбор стратегии зеркалирования по объёму и проверка результата (placeholders, `errors.yaml`, утечки ссылок на live-site). Установка по образцу [pochemuchka](https://github.com/kestgalax/pochemuchka).
+
+**Установка (один из способов):**
+
+```bash
+# CLI agent-skills от Vercel (если установлен)
+npx skills add https://github.com/kestgalax/dochive --skill dochive-mirror
+npx skills add https://github.com/kestgalax/dochive --skill dochive-mirror-verify
+
+# Установщик проекта (macOS/Linux)
+./setup.sh --target cursor
+
+# Вручную (Cursor)
+cp -r skills/dochive-mirror .cursor/skills/
+cp -r skills/dochive-mirror-verify .cursor/skills/
+```
+
+Навыки: **dochive-mirror** (structure → план → mirror) и **dochive-mirror-verify** (каталоги + `skills/dochive-mirror-verify/scripts/check_mirror.sh`).
+
 ## Документация проекта
 
 - [Roadmap](docs/ROADMAP.md)

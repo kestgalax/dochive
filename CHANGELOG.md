@@ -4,6 +4,14 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Agent skills `dochive-mirror` and `dochive-mirror-verify` under `skills/` for structure-first mirroring, volume-based run planning, and post-mirror verification.
+- `setup.sh` and `setup.bat` installers (pochemuchka-style) for OpenCode, Claude Code, Codex, and Cursor.
+- `skills/dochive-mirror-verify/scripts/check_mirror.sh` for automated placeholder, error, and live-site link-leak checks.
+
 ## [0.2.1] — 2026-06-04
 
 Branch `fix/madcap-tables-comments-colwidth`: MadCap table recovery, Gramax notes, and page titles from HTML.

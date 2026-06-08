@@ -4,6 +4,14 @@
 
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Agent skills `dochive-mirror` и `dochive-mirror-verify` в `skills/`: structure → план зеркалирования по объёму → verify после прогона.
+- Установщики `setup.sh` и `setup.bat` (как у pochemuchka) для OpenCode, Claude Code, Codex и Cursor.
+- Скрипт `skills/dochive-mirror-verify/scripts/check_mirror.sh` для проверки placeholders, `errors.yaml` и утечек ссылок на live-site.
+
 ## [0.2.1] — 2026-06-04
 
 Ветка `fix/madcap-tables-comments-colwidth`: восстановление MadCap-таблиц, примечания Gramax и заголовки страниц из HTML.
