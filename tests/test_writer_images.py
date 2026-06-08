@@ -7,6 +7,7 @@ from dochive.writer import (
     _collapse_inline_icon_images,
     _is_inline_icon_asset,
     _render_image,
+    _split_inline_paragraph_images,
     write_mirror,
 )
 
@@ -96,6 +97,83 @@ def test_is_inline_icon_asset_respects_threshold() -> None:
 
     disabled = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"), image_inline_max_px=None)
     assert not _is_inline_icon_asset(Asset("https://example.com/a.png", "images", width=25, height=20), disabled)
+
+
+def test_split_inline_paragraph_images_splits_icon_in_sentence() -> None:
+    image_tag = (
+        '<image src="./lm_p_01_31x30-e324f20148bc.png" crop="0,0,100,100" '
+        'width="31px" height="30px" float="left"/>'
+    )
+    markdown = f"При нажатии на плитку {image_tag} на панели быстрого доступа, отображаются все разделы."
+    split = _split_inline_paragraph_images(markdown)
+    lines = split.splitlines()
+    assert lines == [
+        "При нажатии на плитку",
+        "",
+        image_tag,
+        "",
+        "на панели быстрого доступа, отображаются все разделы.",
+    ]
+
+
+def test_split_inline_paragraph_images_leaves_list_items_unchanged() -> None:
+    markdown = (
+        '  * <image src="./31.png" crop="0,0,100,100" width="25px" height="20px" '
+        'float="left"/> [Service request](req.htm) (SR) – definition text.'
+    )
+    assert _split_inline_paragraph_images(markdown) == markdown
+
+
+def test_split_inline_paragraph_images_handles_multiple_icons() -> None:
+    first = '<image src="./a.png" width="25px" height="20px" float="left"/>'
+    second = '<image src="./b.png" width="24px" height="20px" float="left"/>'
+    markdown = f"Текст1 {first} текст2 {second} текст3"
+    split = _split_inline_paragraph_images(markdown)
+    lines = split.splitlines()
+    assert lines == [
+        "Текст1",
+        "",
+        first,
+        "",
+        "текст2",
+        "",
+        second,
+        "",
+        "текст3",
+    ]
+
+
+def test_write_mirror_splits_paragraph_icons(tmp_path: Path) -> None:
+    page_url = "https://example.com/docs/page.htm"
+    icon = Asset(
+        source="https://example.com/docs/lm_p_01.png",
+        kind="images",
+        local_path="docs/page/lm_p_01.png",
+        width=31,
+        height=30,
+    )
+    markdown = (
+        "При нажатии на плитку "
+        "![tile](https://example.com/docs/lm_p_01.png) "
+        "на панели быстрого доступа, отображаются все разделы."
+    )
+    root = write_mirror(
+        [
+            Page(
+                source_url=page_url,
+                canonical_url=page_url,
+                title="Page",
+                markdown=markdown,
+                depth=0,
+                assets=[icon],
+            )
+        ],
+        MirrorConfig(source=page_url, out_dir=tmp_path),
+    )
+    body = (root / "docs" / "page.md").read_text(encoding="utf-8").split("---", 2)[2]
+    assert "При нажатии на плитку\n\n<image src=" in body
+    assert 'float="left"/>\n\nна панели быстрого доступа' in body
+    assert "![tile]" not in body
 
 
 def test_write_mirror_formats_icon_images_for_gramax_lists(tmp_path: Path) -> None:

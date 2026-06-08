@@ -44,6 +44,8 @@ GRAMAX_IMAGE_SIZE_RE = re.compile(
     re.IGNORECASE,
 )
 GRAMAX_IMAGE_SCALE_RE = re.compile(r'\s+scale="\d+"')
+INLINE_GRAMAX_IMAGE_TAG_RE = re.compile(r"(<image\b[^>]*/>)", re.IGNORECASE)
+LIST_ITEM_LINE_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s")
 MERGED_INLINE_ICON_LIST_RE = re.compile(
     r"^(\s*)(?:[-*])\s+(<image\b[^>]+/>)\s+(.+)$",
     re.IGNORECASE,
@@ -1106,6 +1108,7 @@ def _rewrite_markdown_links(
         asset_by_source,
     )
     markdown = _normalize_media_spacing(markdown, config)
+    markdown = _split_inline_paragraph_images(markdown)
     markdown = _collapse_inline_icon_images(markdown, config)
     markdown = _drop_leading_heading_anchor_links(markdown, page.anchor_headings)
     return _render_details_sections(markdown)
@@ -1139,6 +1142,34 @@ def _is_fenced_code_line(line: str) -> bool:
 def _is_media_line(line: str) -> bool:
     stripped = line.strip().lower()
     return stripped.startswith(("<image ", "<video "))
+
+
+def _split_inline_paragraph_images(markdown: str) -> str:
+    output: list[str] = []
+    in_fence = False
+    for line in markdown.splitlines():
+        if _is_fenced_code_line(line):
+            in_fence = not in_fence
+            output.append(line)
+            continue
+        if in_fence or _is_media_line(line) or LIST_ITEM_LINE_RE.match(line):
+            output.append(line)
+            continue
+        if "<image" not in line.lower() or not INLINE_GRAMAX_IMAGE_TAG_RE.search(line):
+            output.append(line)
+            continue
+        parts = INLINE_GRAMAX_IMAGE_TAG_RE.split(line)
+        for index, part in enumerate(parts):
+            if index % 2 == 0:
+                text = part.strip()
+                if text:
+                    output.append(text)
+            else:
+                if output and output[-1].strip():
+                    output.append("")
+                output.append(part.strip())
+                output.append("")
+    return "\n".join(output)
 
 
 def _render_details_sections(markdown: str) -> str:
@@ -1306,9 +1337,10 @@ def _collapse_inline_icon_images(markdown: str, config: MirrorConfig) -> str:
 
         if _is_inline_icon_image_line(stripped, config):
             image_tag = _normalize_inline_icon_image_tag(stripped)
-            while output and not output[-1].strip():
-                output.pop()
-            if output and EMPTY_LIST_ITEM_RE.fullmatch(output[-1]):
+            previous_nonblank = _last_nonblank_line(output)
+            if previous_nonblank is not None and EMPTY_LIST_ITEM_RE.fullmatch(previous_nonblank):
+                while output and not output[-1].strip():
+                    output.pop()
                 list_match = EMPTY_LIST_ITEM_RE.fullmatch(output[-1])
                 assert list_match is not None
                 indent = list_match.group(1)
@@ -1323,6 +1355,13 @@ def _collapse_inline_icon_images(markdown: str, config: MirrorConfig) -> str:
         output.append(line)
         index += 1
     return "\n".join(output)
+
+
+def _last_nonblank_line(lines: list[str]) -> str | None:
+    for line in reversed(lines):
+        if line.strip():
+            return line
+    return None
 
 
 def _normalize_inline_icon_image_tag(tag: str) -> str:

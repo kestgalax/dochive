@@ -291,7 +291,7 @@ dochive mirror `
 
 Default `--image-size-mode intrinsic` читает реальные downloaded image dimensions и записывает их в Gramax image tag. Saved media хранится рядом с Markdown page: обычные `version_35.md` pages используют `version_35/`, а Gramax head pages используют ту же папку, что и `version_35/_index.md`.
 
-По умолчанию изображения не больше `--image-inline-max-px 48` (например иконки MadCap в списках) остаются inline внутри пункта списка с `float="left"`, а не превращаются в блочные `<image float="center">`, которые Gramax растягивает.
+По умолчанию изображения не больше `--image-inline-max-px 48` (например иконки MadCap в списках) остаются inline внутри пункта списка с `float="left"`, а не превращаются в блочные `<image float="center">`, которые Gramax растягивает. Те же мелкие иконки в абзацном тексте выносятся на отдельную строку с пустыми строками до и после: Gramax ненадёжно рендерит `<image>` внутри строки предложения.
 
 Для wide screenshots ограничьте rendered width с сохранением aspect ratio:
 

@@ -291,7 +291,7 @@ By default, linked screenshots are written in Gramax image form:
 
 The default `--image-size-mode intrinsic` reads the real downloaded image dimensions and writes them into the Gramax image tag. Saved media is stored next to the Markdown page: regular `version_35.md` pages use `version_35/`, while Gramax head pages use the same folder as `version_35/_index.md`.
 
-By default, images at or below `--image-inline-max-px 48` (for example MadCap list icons) stay inline inside list items with `float="left"` instead of centered block `<image>` tags that Gramax would upscale.
+By default, images at or below `--image-inline-max-px 48` (for example MadCap list icons) stay inline inside list items with `float="left"` instead of centered block `<image>` tags that Gramax would upscale. The same small icons in paragraph text are written on their own line with blank lines before and after, because Gramax does not render mid-sentence `<image>` tags reliably.
 
 For wide screenshots, cap rendered width while preserving aspect ratio:
 

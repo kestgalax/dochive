@@ -4,6 +4,18 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.2] — 2026-06-08
+
+Branch `fix/gramax-inline-paragraph-images`: Gramax-safe spacing for inline icons in paragraph text.
+
+### Changed
+
+- `docs/USAGE.md` / `docs/USAGE.ru.md`: document block spacing for small icons in paragraph text; list-item icons still use the inline list layout.
+
+### Fixed
+
+- Small MadCap icons embedded mid-sentence in paragraph text are split onto their own `<image>` line with blank lines before and after, so Gramax renders them correctly (for example tile icons on Naumen NSD Pro quick-start pages). List-item icons keep the existing inline list layout.
+
 ## [0.2.1] — 2026-06-04
 
 Branch `fix/madcap-tables-comments-colwidth`: MadCap table recovery, Gramax notes, and page titles from HTML.
