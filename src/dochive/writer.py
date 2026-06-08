@@ -6,8 +6,10 @@ import os
 import re
 import shutil
 import ssl
+import sys
 from collections import defaultdict
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, url2pathname, urlopen
@@ -64,14 +66,39 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     root.mkdir(parents=True, exist_ok=True)
     catalog_dir = root / "_catalog"
     catalog_dir.mkdir(exist_ok=True)
+    _write_progress("Reading catalog...")
     previous_pages = _read_catalog_items(catalog_dir / "pages.yaml", "pages")
     structure_items = _read_catalog_items(catalog_dir / "structure.yaml", "structure")
     previous_hashes = _catalog_hashes(previous_pages)
 
-    pages = _apply_structure_to_pages(pages, structure_items, previous_pages)
+    mirrored_urls = _mirrored_catalog_urls(previous_pages)
+    prelim_child_urls = _build_child_mapping(pages)
+    prelim_path_by_url = _build_path_mapping(
+        pages,
+        config,
+        prelim_child_urls,
+        previous_pages,
+        structure_items,
+    )
+    prelim_sync_roots = _sync_roots(
+        prelim_path_by_url.values(),
+        _relocated_previous_paths(previous_pages, pages, prelim_path_by_url),
+    )
+    active_scope_folders = _sync_scope_folders(prelim_sync_roots) if prelim_sync_roots else ()
+
+    pages = _apply_structure_to_pages(
+        pages,
+        structure_items,
+        previous_pages,
+        active_scope_folders=active_scope_folders,
+    )
     child_urls_by_parent = _build_child_mapping(pages)
     path_by_url = _build_path_mapping(pages, config, child_urls_by_parent, previous_pages, structure_items)
-    sync_roots = _sync_roots(path_by_url.values(), _relocated_previous_paths(previous_pages, pages, path_by_url))
+    link_path_by_url = _merge_catalog_paths(path_by_url, previous_pages)
+    sync_roots = _sync_roots(
+        path_by_url.values(),
+        _relocated_previous_paths(previous_pages, pages, path_by_url),
+    )
     scoped_previous_hashes = {
         path: content_hash
         for path, content_hash in previous_hashes.items()
@@ -88,8 +115,13 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     written_errors: list[dict[str, object]] = [issue.to_dict() for issue in issues or []]
     unresolved_internal_links: set[str] = set()
 
+    _write_progress(f"Writing {len(pages)} pages...")
     for page in pages:
+        if page.canonical_url not in path_by_url:
+            continue
         relpath = path_by_url[page.canonical_url]
+        if not _should_write_page(page, relpath, mirrored_urls=mirrored_urls, sync_roots=sync_roots):
+            continue
         output_path = root / Path(*relpath.parts)
         _remove_stale_page_alternates(root, relpath)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -99,7 +131,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
         markdown = _rewrite_markdown_links(
             page,
             relpath,
-            path_by_url,
+            link_path_by_url,
             anchor_headings_by_url,
             assets,
             config,
@@ -108,7 +140,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
         frontmatter = _page_frontmatter(
             page,
             relpath,
-            path_by_url,
+            link_path_by_url,
             child_urls_by_parent,
             order_by_url,
             nav_parent_by_url,
@@ -120,8 +152,8 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
 
         written_pages.append(_page_catalog_entry(page, relpath, frontmatter))
         for target in page.links_internal:
-            if target in path_by_url:
-                written_links.append({"from": str(relpath), "to": str(path_by_url[target]), "kind": "internal"})
+            if target in link_path_by_url:
+                written_links.append({"from": str(relpath), "to": str(link_path_by_url[target]), "kind": "internal"})
             else:
                 unresolved_internal_links.add(target)
                 written_links.append({"from": str(relpath), "to": target, "kind": "internal_unresolved"})
@@ -136,8 +168,8 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
                     }
                 )
         for target in page.links_external:
-            if target in path_by_url:
-                written_links.append({"from": str(relpath), "to": str(path_by_url[target]), "kind": "internal"})
+            if target in link_path_by_url:
+                written_links.append({"from": str(relpath), "to": str(link_path_by_url[target]), "kind": "internal"})
             else:
                 written_links.append({"from": str(relpath), "to": target, "kind": "external"})
         for asset in assets:
@@ -152,6 +184,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
                 }
             )
 
+    _write_progress("Updating catalog...")
     merged_pages = _merge_catalog_items(previous_pages, written_pages, sync_roots, path_key="path")
     merged_links = _merge_catalog_items(
         _read_catalog_items(catalog_dir / "links.yaml", "links"),
@@ -171,9 +204,11 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
         sync_roots,
         path_key="path",
     )
-    _write_folder_indexes_from_catalog(root, merged_pages)
+    _write_progress("Updating folder indexes...")
+    _write_folder_indexes_from_catalog(root, merged_pages, sync_roots=sync_roots)
     _write_doc_root_files(root, [PurePosixPath(str(page["path"])) for page in merged_pages if page.get("path")])
     sync_report = _sync_report(scoped_previous_hashes, written_pages, source=config.source, generated_at=now)
+    _write_progress("Writing catalog files...")
     (catalog_dir / "pages.yaml").write_text(dumps_yaml({"pages": merged_pages}), encoding="utf-8")
     (catalog_dir / "links.yaml").write_text(dumps_yaml({"links": merged_links}), encoding="utf-8")
     (catalog_dir / "assets.yaml").write_text(dumps_yaml({"assets": merged_assets}), encoding="utf-8")
@@ -195,6 +230,10 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
         encoding="utf-8",
     )
     return root
+
+
+def _write_progress(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
 
 
 def write_structure_catalog(run: StructureRun, config: MirrorConfig) -> Path:
@@ -446,6 +485,8 @@ def _apply_structure_to_pages(
     pages: list[Page],
     structure_items: list[dict[str, object]],
     previous_pages: list[dict[str, object]] | None = None,
+    *,
+    active_scope_folders: tuple[PurePosixPath, ...] = (),
 ) -> list[Page]:
     if not structure_items:
         return pages
@@ -472,6 +513,12 @@ def _apply_structure_to_pages(
         if canonical_url in mirrored_urls:
             continue
 
+        if active_scope_folders and not _path_in_scope_folders(
+            _structure_item_scope_path(item, previous_pages or []),
+            active_scope_folders,
+        ):
+            continue
+
         title = str(item.get("title") or (nav_path[-1] if nav_path else canonical_url.rsplit("/", 1)[-1]))
         fetch_url = str(item.get("fetch_url") or item.get("source_url") or canonical_url)
         placeholder = Page(
@@ -487,6 +534,40 @@ def _apply_structure_to_pages(
         by_url[canonical_url] = placeholder
         pages.append(placeholder)
     return sorted(pages, key=lambda page: _structure_order(page, structure_items))
+
+
+def _structure_item_scope_path(item: dict[str, object], previous_pages: list[dict[str, object]]) -> PurePosixPath:
+    path = item.get("path")
+    if isinstance(path, str) and path:
+        relpath = PurePosixPath(path)
+        return relpath.parent if relpath.suffix.lower() == ".md" else relpath
+    canonical_url = item.get("canonical_url")
+    if isinstance(canonical_url, str) and canonical_url:
+        for page in previous_pages:
+            if page.get("canonical_url") == canonical_url:
+                previous_path = page.get("path")
+                if isinstance(previous_path, str) and previous_path:
+                    relpath = PurePosixPath(previous_path)
+                    return relpath.parent if relpath.suffix.lower() == ".md" else relpath
+        relpath = url_to_markdown_relpath(canonical_url)
+        return relpath.parent if relpath.suffix.lower() == ".md" else relpath
+    return PurePosixPath(".")
+
+
+def _should_write_page(
+    page: Page,
+    relpath: PurePosixPath,
+    *,
+    mirrored_urls: set[str],
+    sync_roots: tuple[PurePosixPath, ...],
+) -> bool:
+    if not page.placeholder:
+        return True
+    if page.canonical_url in mirrored_urls:
+        return False
+    if sync_roots and not _path_in_roots(str(relpath), sync_roots):
+        return False
+    return True
 
 
 def _mirrored_catalog_urls(previous_pages: list[dict[str, object]]) -> set[str]:
@@ -603,6 +684,35 @@ def _append_path_hash(path: PurePosixPath, value: str) -> PurePosixPath:
     if path.name == "_index.md":
         return path.parent.parent / f"{path.parent.name}-{suffix}" / "_index.md"
     return path.with_name(f"{path.stem}-{suffix}{path.suffix}")
+
+
+def _catalog_path_by_url(previous_pages: list[dict[str, object]]) -> dict[str, PurePosixPath]:
+    by_url: dict[str, PurePosixPath] = {}
+    for item in previous_pages:
+        if item.get("placeholder") is True:
+            continue
+        path = item.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        relpath = PurePosixPath(path)
+        canonical_url = item.get("canonical_url")
+        if (
+            isinstance(canonical_url, str)
+            and canonical_url
+            and _catalog_path_is_reusable(canonical_url, relpath, item)
+        ):
+            by_url[canonical_url] = relpath
+    return by_url
+
+
+def _merge_catalog_paths(
+    path_by_url: dict[str, PurePosixPath],
+    previous_pages: list[dict[str, object]],
+) -> dict[str, PurePosixPath]:
+    merged = dict(path_by_url)
+    for url, path in _catalog_path_by_url(previous_pages).items():
+        merged.setdefault(url, path)
+    return merged
 
 
 def _catalog_path_for_page(page: Page, previous_pages: list[dict[str, object]]) -> PurePosixPath | None:
@@ -778,10 +888,13 @@ def _merge_catalog_items(
     *,
     path_key: str,
 ) -> list[dict[str, object]]:
+    if not sync_roots:
+        return [*previous, *current]
+    scope_folders = _sync_scope_folders(sync_roots)
     preserved = [
         item
         for item in previous
-        if not _path_in_roots(str(item.get(path_key) or ""), sync_roots)
+        if not _path_in_scope_folders(PurePosixPath(str(item.get(path_key) or "")), scope_folders)
     ]
     return [*preserved, *current]
 
@@ -816,10 +929,27 @@ def _sync_roots(paths: object, relocated_previous_paths: object = ()) -> tuple[P
 
 
 def _path_in_roots(path: str, roots: tuple[PurePosixPath, ...]) -> bool:
-    if not path:
+    if not path or not roots:
         return False
-    relpath = PurePosixPath(path)
-    return any(_is_relative_to(relpath, root) for root in roots)
+    return _path_in_scope_folders(PurePosixPath(path), _sync_scope_folders(roots))
+
+
+@lru_cache(maxsize=16)
+def _sync_scope_folders(sync_roots: tuple[PurePosixPath, ...]) -> tuple[PurePosixPath, ...]:
+    folders = {_sync_root_folder(root) for root in sync_roots}
+    minimal: set[PurePosixPath] = set()
+    for folder in sorted(folders, key=lambda item: (len(item.parts), str(item))):
+        if any(_is_relative_to(folder, kept) for kept in minimal):
+            continue
+        minimal = {kept for kept in minimal if not _is_relative_to(kept, folder)}
+        minimal.add(folder)
+    return tuple(sorted(minimal, key=str))
+
+
+def _path_in_scope_folders(relpath: PurePosixPath, scope_folders: tuple[PurePosixPath, ...]) -> bool:
+    if str(relpath) == ".":
+        return False
+    return any(_is_relative_to(relpath, scope) for scope in scope_folders)
 
 
 def _unlink_file(path: Path) -> None:
@@ -945,7 +1075,12 @@ def _write_folder_indexes(
         (folder_path / "_index.yaml").write_text(dumps_yaml(payload), encoding="utf-8")
 
 
-def _write_folder_indexes_from_catalog(root: Path, pages: list[dict[str, object]]) -> None:
+def _write_folder_indexes_from_catalog(
+    root: Path,
+    pages: list[dict[str, object]],
+    *,
+    sync_roots: tuple[PurePosixPath, ...] = (),
+) -> None:
     folders: dict[PurePosixPath, list[dict[str, object]]] = defaultdict(list)
     for page in pages:
         path = page.get("path")
@@ -961,8 +1096,9 @@ def _write_folder_indexes_from_catalog(root: Path, pages: list[dict[str, object]
             current = current.parent
             all_folders.add(current)
 
+    folders_to_refresh = _folders_to_refresh(all_folders, sync_roots)
     folder_titles = _folder_titles_from_catalog(pages)
-    for folder in sorted(all_folders, key=lambda item: str(item)):
+    for folder in sorted(folders_to_refresh or all_folders, key=lambda item: str(item)):
         folder_path = root if str(folder) == "." else root / Path(*folder.parts)
         folder_path.mkdir(parents=True, exist_ok=True)
         child_dirs = sorted(
@@ -1000,6 +1136,33 @@ def _write_folder_indexes_from_catalog(root: Path, pages: list[dict[str, object]
             "keywords": sorted({word for page in folder_pages for word in _keywords(str(page.get("title") or ""))}),
         }
         (folder_path / "_index.yaml").write_text(dumps_yaml(payload), encoding="utf-8")
+
+
+def _folders_to_refresh(
+    all_folders: set[PurePosixPath],
+    sync_roots: tuple[PurePosixPath, ...],
+) -> set[PurePosixPath] | None:
+    if not sync_roots:
+        return None
+
+    scope_folders = _sync_scope_folders(sync_roots)
+    refresh: set[PurePosixPath] = set()
+    for folder in all_folders:
+        if folder in scope_folders:
+            refresh.add(folder)
+            continue
+        if _path_in_scope_folders(folder, scope_folders):
+            refresh.add(folder)
+            continue
+        if any(_is_relative_to(scope, folder) for scope in scope_folders):
+            refresh.add(folder)
+    return refresh
+
+
+def _sync_root_folder(path: PurePosixPath) -> PurePosixPath:
+    if path.suffix.lower() == ".md":
+        return path.parent
+    return path
 
 
 def _folder_titles_from_catalog(pages: list[dict[str, object]]) -> dict[PurePosixPath, str]:
@@ -1586,6 +1749,9 @@ def _materialize_assets(
                 materialized.append(asset)
                 continue
             elif is_url(asset.source):
+                if target.is_file() and target.stat().st_size > 0:
+                    materialized.append(_asset_with_local_metadata(asset, target_rel.as_posix(), target))
+                    continue
                 _download_url(asset.source, target, config)
                 materialized.append(_asset_with_local_metadata(asset, target_rel.as_posix(), target))
                 continue
@@ -1604,12 +1770,12 @@ def _materialize_assets(
     return materialized, errors
 
 
-def _download_url(source: str, target: Path, config: MirrorConfig) -> None:
+def _download_url(source: str, target: Path, config: MirrorConfig, *, timeout: float = 30.0) -> None:
     context = None
     if certifi is not None:
         context = ssl.create_default_context(cafile=certifi.where())
     request = Request(source, headers=request_headers(config))
-    with urlopen(request, context=context) as response, target.open("wb") as output:
+    with urlopen(request, context=context, timeout=timeout) as response, target.open("wb") as output:
         shutil.copyfileobj(response, output)
 
 

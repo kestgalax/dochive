@@ -20,6 +20,7 @@ tmp*/
 !/tests/test_html_extract.py
 !/tests/test_url_utils.py
 !/tests/test_writer_images.py
+!/tests/test_writer_links.py
 main_page/
 .DS_Store
 .pytest_cache

@@ -4,6 +4,27 @@
 
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/).
 
+## [0.2.4] — 2026-06-08
+
+Ветка `fix/incremental-cross-section-links`: переписывание ссылок и сохранение каталога при порционном mirror.
+
+### Fixed
+
+- При partial mirror внутренние ссылки переписываются на страницы, уже записанные в `_catalog/pages.yaml`, а не только на URL текущего прогона (например ссылки из introduction на QuickStart после отдельного зеркалирования разделов).
+- Partial mirror больше не заменяет ранее зеркалированные разделы placeholder-markdown при зеркалировании другой ветки TOC в ту же output directory.
+- Регрессия, при которой merge catalog paths расширял `sync_roots` на весь mirror и выбрасывал записи других разделов из `_catalog/pages.yaml`.
+
+### Changed
+
+- `dochive mirror` выводит пошаговый прогресс в stderr (`Reading catalog...`, `Writing N pages...`, `Updating catalog...` и связанные этапы).
+- При partial sync обновляются `_index.yaml` только в пределах текущего sync scope, а не всего дерева mirror.
+- Завершение Crawl4AI явно закрывает браузер с таймаутом; локализованные изображения не скачиваются повторно, если файл уже есть на диске.
+- Загрузка ассетов использует таймаут URL 30 секунд.
+
+### Added
+
+- Тесты в `tests/test_writer_links.py` на переписывание cross-section ссылок и сохранение каталога и файлов при partial mirror.
+
 ## [0.2.3] — 2026-06-08
 
 Ветка `fix/madcap-spoiler-podrobnee`: восстановление спойлеров MadCap «Подробнее» в выводе Gramax.
