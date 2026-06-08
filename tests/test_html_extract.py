@@ -202,6 +202,57 @@ def test_inject_html_comments_replaces_madcap_comment_paragraph() -> None:
     assert injected.strip().endswith(":::")
 
 
+def test_inject_html_comments_keeps_plain_listing_code_example() -> None:
+    html = '<p class="listing">&lt;h2&gt;Заголовок раздела&lt;/h2&gt;</p>'
+    markdown = "<h2>Заголовок раздела</h2>"
+    injected = inject_html_comments(markdown, html)
+    assert injected.strip() == markdown.strip()
+
+
+def test_inject_html_comments_keeps_listing_with_label_anchor_only() -> None:
+    html = '<p class="listing">&lt;a name="label1"&gt;&lt;/a&gt;</p>'
+    markdown = '<a name="label1"></a>'
+    injected = inject_html_comments(markdown, html)
+    assert injected.strip() == markdown.strip()
+
+
+def test_inject_html_comments_replaces_madcap_listing_with_mixed_text() -> None:
+    html = (
+        '<p class="listing">'
+        '&lt;a name="label1"&gt;&lt;/a&gt; место в тексте, на который будет указывать ссылка'
+        "</p>"
+    )
+    markdown = '<a name="label1"></a> место в тексте, на который будет указывать ссылка'
+    injected = inject_html_comments(markdown, html)
+    assert injected.splitlines() == [
+        ":::note:false",
+        '`<a name="label1"></a>` место в тексте, на который будет указывать ссылка',
+        ":::",
+    ]
+
+
+def test_inject_html_comments_replaces_madcap_listing_with_label_href() -> None:
+    html = (
+        '<p class="listing">'
+        'Подробное описание настройки см. &lt;a href="#label1"&gt;Ссылка на label1&lt;/a&gt;'
+        "</p>"
+    )
+    markdown = 'Подробное описание настройки см. <a href="#label1">Ссылка на label1</a>'
+    injected = inject_html_comments(markdown, html)
+    assert injected.splitlines() == [
+        ":::note:false",
+        'Подробное описание настройки см. `<a href="#label1">Ссылка на label1</a>`',
+        ":::",
+    ]
+
+
+def test_inject_html_comments_keeps_listing_with_label_href_only() -> None:
+    html = '<p class="listing">&lt;a href="#label1"&gt;Ссылаемся label1&lt;/a&gt;</p>'
+    markdown = '<a href="#label1">Ссылаемся label1</a>'
+    injected = inject_html_comments(markdown, html)
+    assert injected.strip() == markdown.strip()
+
+
 def test_sanitize_table_uses_column_width_for_header_and_body() -> None:
     html = """
     <table>

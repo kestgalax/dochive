@@ -1377,7 +1377,11 @@ def _rewrite_markdown_links(
     markdown = _normalize_media_spacing(markdown, config)
     markdown = _isolate_gramax_images(markdown, config)
     markdown = _normalize_media_spacing(markdown, config)
-    markdown = _drop_leading_heading_anchor_links(markdown, page.anchor_headings)
+    markdown = _drop_leading_heading_anchor_links(
+        markdown,
+        page.anchor_headings,
+        page.toc_link_labels,
+    )
     return _render_details_sections(markdown)
 
 

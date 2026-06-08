@@ -7,6 +7,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
+from .markdown_normalizer import drop_madcap_toc_link_blocks
 from .models import Asset
 from .text_utils import repair_mojibake
 from .url_utils import canonicalize_url, is_url
@@ -365,8 +366,30 @@ def _dedupe_adjacent_markdown_headings(markdown: str) -> str:
     return "\n".join(output).strip() + "\n"
 
 
+_LISTING_LABEL_ANCHOR_NOTE_RE = re.compile(
+    r'<a\s+name="[^"]+"\s*(?:/>|>\s*</a>)\s+\S',
+    re.IGNORECASE,
+)
+_LISTING_LABEL_HREF_NOTE_RE = re.compile(
+    r'[^<>]+\s+<a\s+href="#[^"]+"\s*[^>]*>',
+    re.IGNORECASE,
+)
+_LISTING_LABEL_NAME_TAG_RE = re.compile(
+    r'<a\s+name="[^"]+"\s*(?:/>|>\s*</a>)',
+    re.IGNORECASE,
+)
+_LISTING_LABEL_HREF_TAG_RE = re.compile(
+    r'<a\s+href="#[^"]+"\s*[^>]*>.*?</a>',
+    re.IGNORECASE,
+)
+
+
 def inject_html_comments(markdown: str, html: str) -> str:
-    """Convert MadCap <p class=\"comment\"> blocks into Gramax note callouts."""
+    """Convert MadCap note paragraphs into Gramax note callouts.
+
+    Handles ``<p class="comment">`` notes and explanatory ``<p class="listing">``
+    paragraphs that reference MadCap label anchors.
+    """
 
     comments = extract_html_comments(html)
     if not comments:
@@ -381,7 +404,7 @@ def inject_html_comments(markdown: str, html: str) -> str:
         for comment in comments:
             if _line_matches_comment_text(line, comment):
                 output.append(":::note:false")
-                output.append(comment)
+                output.append(_format_note_callout_text(comment))
                 output.append(":::")
                 replaced = True
                 break
@@ -411,6 +434,8 @@ def _sanitize_html_table(html: str, base_url: str) -> str:
 
 
 def extract_html_comments(html: str) -> list[str]:
+    """Extract text from MadCap ``comment`` and label-style ``listing`` paragraphs."""
+
     parser = _HtmlCommentParser()
     parser.feed(html)
     parser.close()
@@ -697,6 +722,21 @@ def _line_matches_comment_text(line: str, comment: str) -> bool:
     return bool(normalized_line and normalized_line == comment)
 
 
+def _listing_contains_label_note(text: str) -> bool:
+    return bool(
+        _LISTING_LABEL_ANCHOR_NOTE_RE.search(text)
+        or _LISTING_LABEL_HREF_NOTE_RE.search(text)
+    )
+
+
+def _format_note_callout_text(text: str) -> str:
+    if _LISTING_LABEL_ANCHOR_NOTE_RE.search(text):
+        return _LISTING_LABEL_NAME_TAG_RE.sub(lambda match: f"`{match.group(0)}`", text, count=1)
+    if _LISTING_LABEL_HREF_NOTE_RE.search(text):
+        return _LISTING_LABEL_HREF_TAG_RE.sub(lambda match: f"`{match.group(0)}`", text)
+    return text
+
+
 def _normalize_comment_text(text: str) -> str:
     stripped = repair_mojibake(text).replace("\xa0", " ").strip()
     stripped = re.sub(r"^\s*[-*+]\s+", "", stripped)
@@ -910,7 +950,7 @@ class _HtmlCommentParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.comments: list[str] = []
         self._skip_depth = 0
-        self._active = False
+        self._active_kind: str | None = None
         self._parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -921,7 +961,10 @@ class _HtmlCommentParser(HTMLParser):
             return
         attrs_map = {key.lower(): value or "" for key, value in attrs}
         if tag == "p" and _has_class_token(attrs_map, "comment"):
-            self._active = True
+            self._active_kind = "comment"
+            self._parts = []
+        elif tag == "p" and _has_class_token(attrs_map, "listing"):
+            self._active_kind = "listing"
             self._parts = []
 
     def handle_endtag(self, tag: str) -> None:
@@ -930,15 +973,18 @@ class _HtmlCommentParser(HTMLParser):
             return
         if self._skip_depth:
             return
-        if tag == "p" and self._active:
+        if tag == "p" and self._active_kind:
             text = _normalize_comment_text("".join(self._parts))
-            if text and text not in self.comments:
+            include = self._active_kind == "comment" or (
+                self._active_kind == "listing" and _listing_contains_label_note(text)
+            )
+            if include and text and text not in self.comments:
                 self.comments.append(text)
-            self._active = False
+            self._active_kind = None
             self._parts = []
 
     def handle_data(self, data: str) -> None:
-        if self._skip_depth or not self._active:
+        if self._skip_depth or not self._active_kind:
             return
         self._parts.append(data)
 
@@ -957,10 +1003,43 @@ def extract_html_anchor_headings(html: str) -> dict[str, str]:
     return parser.anchor_headings
 
 
+def drop_madcap_toc_anchor_links(markdown: str, html: str) -> str:
+    """Remove MadCap intra-page ``ul.TOC`` lists before heading recovery runs."""
+
+    return drop_madcap_toc_link_blocks(
+        markdown,
+        extract_html_anchor_headings(html),
+        extract_html_toc_link_labels(html),
+    )
+
+
+def extract_html_toc_link_labels(html: str) -> tuple[str, ...]:
+    """Return visible link labels from MadCap intra-page ``ul.TOC`` blocks."""
+
+    labels: list[str] = []
+    for toc_match in re.finditer(
+        r'<ul\b[^>]*\bclass="[^"]*\bTOC\b[^"]*"[^>]*>(.*?)</ul>',
+        html,
+        re.IGNORECASE | re.DOTALL,
+    ):
+        for link_match in re.finditer(
+            r'<a\b[^>]*\bhref="(#[^"]+)"[^>]*>(.*?)</a>',
+            toc_match.group(1),
+            re.IGNORECASE | re.DOTALL,
+        ):
+            text = _normalize_comment_text(re.sub(r"<[^>]+>", "", link_match.group(2)))
+            if text and text not in labels:
+                labels.append(text)
+    return tuple(labels)
+
+
 def promote_markdown_headings(markdown: str, html: str) -> str:
     """Restore Markdown heading markers from source HTML when an extractor drops them."""
 
     headings = extract_html_headings(html)
+    toc_labels = {
+        _normalize_comment_text(label) for label in extract_html_toc_link_labels(html)
+    }
     heading_levels: dict[str, int] = {}
     for heading in headings:
         normalized = _normalize_heading_text(repair_mojibake(heading.text))
@@ -984,7 +1063,7 @@ def promote_markdown_headings(markdown: str, html: str) -> str:
             output.append(f"{'#' * level} {normalized}")
         else:
             output.append(line)
-    return "\n".join(_insert_missing_markdown_headings(output, headings))
+    return "\n".join(_insert_missing_markdown_headings(output, headings, toc_labels))
 
 
 class _HtmlHeadingParser(HTMLParser):
@@ -1189,7 +1268,11 @@ def _append_anchor(anchors: list[str], value: str) -> None:
         anchors.append(value)
 
 
-def _insert_missing_markdown_headings(lines: list[str], headings: list[HtmlHeading]) -> list[str]:
+def _insert_missing_markdown_headings(
+    lines: list[str],
+    headings: list[HtmlHeading],
+    toc_labels: set[str] | None = None,
+) -> list[str]:
     output = list(lines)
     search_start = 0
     for heading in headings:
@@ -1197,7 +1280,7 @@ def _insert_missing_markdown_headings(lines: list[str], headings: list[HtmlHeadi
         if not normalized:
             continue
 
-        insertion_match = _heading_insertion_match(output, heading, search_start)
+        insertion_match = _heading_insertion_match(output, heading, search_start, toc_labels)
         existing_index = _find_markdown_heading(output, normalized, search_start)
         if existing_index is not None and (
             insertion_match is None or existing_index <= insertion_match[1]
@@ -1222,21 +1305,42 @@ def _find_markdown_heading(lines: list[str], text: str, start_index: int) -> int
     return None
 
 
-def _heading_insertion_match(lines: list[str], heading: HtmlHeading, start_index: int = 0) -> tuple[int, int] | None:
+def _heading_insertion_match(
+    lines: list[str],
+    heading: HtmlHeading,
+    start_index: int = 0,
+    toc_labels: set[str] | None = None,
+) -> tuple[int, int] | None:
     for anchor in heading.anchors:
         normalized_anchor = _normalize_heading_text(repair_mojibake(anchor))
         if not normalized_anchor:
             continue
         for index, line in enumerate(lines[start_index:], start=start_index):
+            if _is_madcap_toc_markdown_line(line, toc_labels):
+                continue
             if _line_contains_anchor(line, normalized_anchor):
                 return _previous_block_start(lines, index), index
 
     snippet = _normalize_following_snippet(heading.following_snippet)
     if snippet:
         for index, line in enumerate(lines[start_index:], start=start_index):
+            if _is_madcap_toc_markdown_line(line, toc_labels):
+                continue
             if _line_matches_following_snippet(line, snippet):
                 return _previous_block_start(lines, index), index
     return None
+
+
+def _is_madcap_toc_markdown_line(line: str, toc_labels: set[str] | None) -> bool:
+    if not toc_labels:
+        return False
+    stripped = re.sub(r"^\s*(?:[-*]|\d+[.)])\s+", "", line.strip())
+    if not stripped:
+        return False
+    match = re.fullmatch(r"\[([^\]]+)\]\(([^)]+)\)", stripped)
+    if not match:
+        return False
+    return _normalize_comment_text(match.group(1)) in toc_labels
 
 
 def _drop_next_duplicate_heading(lines: list[str], inserted_index: int, level: int, text: str) -> None:

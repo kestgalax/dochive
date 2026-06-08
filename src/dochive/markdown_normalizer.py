@@ -38,6 +38,7 @@ def normalize_markdown(
     clean: bool = True,
     extra_noise_lines: tuple[str, ...] = (),
     anchor_headings: dict[str, str] | None = None,
+    toc_link_labels: tuple[str, ...] = (),
 ) -> str:
     text = repair_mojibake(markdown)
     text = _normalize_nbsp(text)
@@ -51,7 +52,11 @@ def normalize_markdown(
         text = _trim_leading_page_chrome(text)
         text = _drop_embedded_navigation_chrome(text)
         text = _normalize_heading_permalinks(text)
-        text = _drop_leading_heading_anchor_links(text, anchor_headings or {})
+        text = _drop_heading_anchor_link_blocks(
+            text,
+            anchor_headings or {},
+            toc_link_labels,
+        )
         text = _drop_footer_chrome(text)
         text = _collapse_repeated_lines(text)
         text = _normalize_blank_lines(text)
@@ -162,15 +167,69 @@ def _drop_next_page_links(text: str) -> str:
     return "\n".join(output)
 
 
-def _drop_leading_heading_anchor_links(text: str, anchor_headings: dict[str, str]) -> str:
+def _drop_leading_heading_anchor_links(
+    text: str,
+    anchor_headings: dict[str, str],
+    toc_link_labels: tuple[str, ...] = (),
+) -> str:
+    return _drop_heading_anchor_link_blocks(text, anchor_headings, toc_link_labels)
+
+
+def _drop_heading_anchor_link_blocks(
+    text: str,
+    anchor_headings: dict[str, str],
+    toc_link_labels: tuple[str, ...] = (),
+) -> str:
+    text = _drop_madcap_toc_link_blocks(text, anchor_headings, toc_link_labels)
+    return _drop_leading_heading_anchor_nav(text, anchor_headings)
+
+
+def drop_madcap_toc_link_blocks(
+    markdown: str,
+    anchor_headings: dict[str, str],
+    toc_link_labels: tuple[str, ...],
+) -> str:
+    return _drop_madcap_toc_link_blocks(markdown, anchor_headings, toc_link_labels)
+
+
+def _drop_madcap_toc_link_blocks(
+    text: str,
+    anchor_headings: dict[str, str],
+    toc_link_labels: tuple[str, ...],
+) -> str:
+    if not toc_link_labels:
+        return text
+
+    known_targets = _known_anchor_targets(anchor_headings)
+    toc_labels = {_normalize_link_label(label) for label in toc_link_labels if _normalize_link_label(label)}
+    lines = text.splitlines()
+    output: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if _is_madcap_toc_list_item_line(line, known_targets, toc_labels):
+            index += 1
+            while index < len(lines):
+                if not lines[index].strip():
+                    index += 1
+                    continue
+                if _is_madcap_toc_list_item_line(lines[index], known_targets, toc_labels):
+                    index += 1
+                    continue
+                break
+            while output and not output[-1].strip():
+                output.pop()
+            continue
+        output.append(line)
+        index += 1
+    return "\n".join(output)
+
+
+def _drop_leading_heading_anchor_nav(text: str, anchor_headings: dict[str, str]) -> str:
     if not anchor_headings:
         return text
 
-    known_targets = {
-        _normalize_anchor_target(target)
-        for target in (*anchor_headings.keys(), *anchor_headings.values())
-        if _normalize_anchor_target(target)
-    }
+    known_targets = _known_anchor_targets(anchor_headings)
     lines = text.splitlines()
     output: list[str] = []
     index = 0
@@ -191,6 +250,14 @@ def _drop_leading_heading_anchor_links(text: str, anchor_headings: dict[str, str
         return text
     output.extend(lines[index:])
     return "\n".join(output)
+
+
+def _known_anchor_targets(anchor_headings: dict[str, str]) -> set[str]:
+    return {
+        _normalize_link_label(target)
+        for target in (*anchor_headings.keys(), *anchor_headings.values())
+        if _normalize_link_label(target)
+    }
 
 
 def _normalize_heading_permalinks(text: str) -> str:
@@ -255,7 +322,21 @@ def _heading_dedupe_key(line: str) -> str:
     return f"{len(match.group(1).strip())}:{text}"
 
 
-def _is_heading_anchor_link_line(line: str, known_targets: set[str]) -> bool:
+def _is_madcap_toc_list_item_line(
+    line: str,
+    known_targets: set[str],
+    toc_labels: set[str],
+) -> bool:
+    if not re.match(r"^\s*(?:[-*]|\d+[.)])\s+", line.strip()):
+        return False
+    return _is_heading_anchor_link_block_line(line, known_targets, toc_labels)
+
+
+def _is_heading_anchor_link_block_line(
+    line: str,
+    known_targets: set[str],
+    toc_labels: set[str],
+) -> bool:
     stripped = re.sub(r"^\s*(?:[-*]|\d+[.)])\s+", "", line.strip())
     if not stripped:
         return False
@@ -268,13 +349,21 @@ def _is_heading_anchor_link_line(line: str, known_targets: set[str]) -> bool:
         match = _MARKDOWN_LINK_TOKEN_RE.match(stripped, position)
         if not match:
             return False
-        target = _normalize_anchor_target(_target_fragment(match.group(2)))
-        label = _normalize_anchor_target(match.group(1))
-        if target not in known_targets and label not in known_targets:
+        label = _normalize_link_label(match.group(1))
+        target = _normalize_link_label(_target_fragment(match.group(2)))
+        if not (target in known_targets or label in known_targets or label in toc_labels):
             return False
         found = True
         position = match.end()
     return found
+
+
+def _is_heading_anchor_link_line(line: str, known_targets: set[str]) -> bool:
+    return _is_heading_anchor_link_block_line(line, known_targets, set())
+
+
+def _normalize_link_label(text: str) -> str:
+    return _normalize_anchor_target(repair_mojibake(text).replace("\xa0", " "))
 
 
 def _target_fragment(target: str) -> str:

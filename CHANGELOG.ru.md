@@ -20,18 +20,23 @@
 
 ## [0.2.5] — 2026-06-08
 
+Ветка `cursor/image-isolation-relink-partial-sync`.
+
 ### Added
 
 - Команда `dochive relink` офлайн переписывает абсолютные Markdown-ссылки во внутренние пути зеркала по `_catalog/structure.yaml` и `pages.yaml`; поддерживаются `--dry-run` и `--path-prefix` для выборочного прогона.
-- Тесты в `tests/test_relink.py` и `tests/test_markdown_normalizer.py` для relink и очистки пустых ссылок.
+- Тесты в `tests/test_relink.py`, `tests/test_markdown_normalizer.py` и `tests/test_writer_images.py` для relink, очистки пустых ссылок и изоляции Gramax-блоков `<image>`.
 
 ### Changed
 
-- `docs/USAGE.md` / `docs/USAGE.ru.md`: описан incremental-workflow с `relink` после порционного зеркалирования.
+- Любые Gramax-теги `<image>`, включая мелкие иконки MadCap в списках, записываются отдельными блоками с пустыми строками до и после; текст пункта идёт после image-блока, а не внутри буллита (например списки clockGreen/clockRed).
+- `docs/USAGE.md` / `docs/USAGE.ru.md`: описаны единое правило block-layout для `<image>` и incremental-workflow с `relink` после порционного зеркалирования.
 
 ### Fixed
 
 - Нормализация Markdown удаляет пустые метки ссылок `[](url)` из невалидных вложенных MadCap-якорей (например `доступно [](...)[по ссылке](...)` → `доступно [по ссылке](...)`), не затрагивая `![](...)` и блоки кода.
+- Partial mirror больше не удаляет соседние страницы в той же папке, если follow-up прогон зеркалит только другую страницу этого каталога.
+- Follow-up mirror с `structure.yaml` записывает ancestor-placeholder страницы, нужные для навигации (например `introduction/_index.md` при зеркалировании дочернего раздела вроде Change List).
 
 ## [0.2.4] — 2026-06-08
 

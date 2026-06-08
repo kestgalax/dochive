@@ -85,7 +85,8 @@ CLI создаёт `mirror_root = <out>/<domain>/` автоматически ([
 | Источник | Mirror |
 |----------|--------|
 | HTML-таблицы | `{% table %}` + `{% colwidth=[…] %}` |
-| `<p class="comment">` | `:::note:false` |
+| `<p class="comment">`, поясняющий `<p class="listing">` с `<a name="..."></a>` или `<a href="#...">` | `:::note:false` |
+| `ul.TOC` (intra-page mini-TOC) | удаляется |
 | «Подробнее» / MCDropDown | `<details>` / `<summary>` |
 | Иконки в списке (≤52 px) | inline, `<image>` на отдельной строке |
 | Иконки в абзаце | `<image>` на отдельной строке + пустые строки |
