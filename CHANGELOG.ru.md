@@ -15,6 +15,7 @@
 ### Changed
 
 - Навыки: preflight, режимы greenfield/incremental/refresh/verify-only, пояснение `--out` vs `mirror_root`, запрет `--structure-mode links` на существующем MadCap-зеркале; после `git pull` переустановка: `./setup.sh --target cursor --force`.
+- Локальные установки навыков в IDE (`.cursor/skills/`, `.opencode/skills/`) больше не в git; источник — каталог `skills/`.
 - Краткий гайд по навыкам: `docs/SKILLS.ru.md` / `docs/SKILLS.md`.
 
 ## [0.2.4] — 2026-06-08

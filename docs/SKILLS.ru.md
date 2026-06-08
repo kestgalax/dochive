@@ -29,7 +29,7 @@ cp -r skills/dochive-mirror .cursor/skills/
 cp -r skills/dochive-mirror-verify .cursor/skills/
 ```
 
-После `git pull` с изменениями в `skills/` **переустановите** навыки (`--force`). Копия в `.cursor/skills/` сама не обновляется.
+После `git pull` с изменениями в `skills/` **переустановите** навыки (`--force`). Копии в `.cursor/skills/` и `.opencode/skills/` локальные (не в git) и сами не обновляются.
 
 ## Как вызвать в чате
 

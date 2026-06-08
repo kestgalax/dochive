@@ -27,3 +27,9 @@ main_page/
 example.md
 .env
 !.env.example
+
+# Local IDE skill installs (source: skills/, install via setup.sh)
+.cursor/skills/
+.opencode/skills/
+.claude/skills/
+.codex/skills/

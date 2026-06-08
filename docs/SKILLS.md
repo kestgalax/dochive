@@ -29,7 +29,7 @@ cp -r skills/dochive-mirror .cursor/skills/
 cp -r skills/dochive-mirror-verify .cursor/skills/
 ```
 
-After `git pull` that changes `skills/`, **reinstall** (`--force`). `.cursor/skills/` is a copy and does not update itself.
+After `git pull` that changes `skills/`, **reinstall** (`--force`). `.cursor/skills/` and `.opencode/skills/` are local copies (not tracked in git) and do not update themselves.
 
 ## Invoke in chat
 
