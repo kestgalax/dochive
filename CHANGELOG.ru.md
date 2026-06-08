@@ -18,6 +18,21 @@
 - Локальные установки навыков в IDE (`.cursor/skills/`, `.opencode/skills/`) больше не в git; источник — каталог `skills/`.
 - Краткий гайд по навыкам: `docs/SKILLS.ru.md` / `docs/SKILLS.md`.
 
+## [0.2.5] — 2026-06-08
+
+### Added
+
+- Команда `dochive relink` офлайн переписывает абсолютные Markdown-ссылки во внутренние пути зеркала по `_catalog/structure.yaml` и `pages.yaml`; поддерживаются `--dry-run` и `--path-prefix` для выборочного прогона.
+- Тесты в `tests/test_relink.py` и `tests/test_markdown_normalizer.py` для relink и очистки пустых ссылок.
+
+### Changed
+
+- `docs/USAGE.md` / `docs/USAGE.ru.md`: описан incremental-workflow с `relink` после порционного зеркалирования.
+
+### Fixed
+
+- Нормализация Markdown удаляет пустые метки ссылок `[](url)` из невалидных вложенных MadCap-якорей (например `доступно [](...)[по ссылке](...)` → `доступно [по ссылке](...)`), не затрагивая `![](...)` и блоки кода.
+
 ## [0.2.4] — 2026-06-08
 
 Ветка `fix/incremental-cross-section-links`: переписывание ссылок и сохранение каталога при порционном mirror.

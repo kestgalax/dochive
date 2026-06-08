@@ -41,10 +41,6 @@ HTML_MEDIA_URL_RE = re.compile(
     r"(<(?:a|video|source)\b[^>]*\b(?:href|path|src)=[\"'])([^\"']+)([\"'][^>]*>)",
     re.IGNORECASE,
 )
-GRAMAX_IMAGE_SIZE_RE = re.compile(
-    r"""<image\b[^>]*\bwidth="(\d+)px"[^>]*\bheight="(\d+)px"|<image\b[^>]*\bheight="(\d+)px"[^>]*\bwidth="(\d+)px" """,
-    re.IGNORECASE,
-)
 GRAMAX_IMAGE_SCALE_RE = re.compile(r'\s+scale="\d+"')
 INLINE_GRAMAX_IMAGE_TAG_RE = re.compile(r"(<image\b[^>]*/>)", re.IGNORECASE)
 _DETAILS_SUMMARY_LABELS = ("Подробное описание", "Подробнее", "Читать далее")
@@ -53,10 +49,6 @@ _DETAILS_SUMMARY_LINK_RE = re.compile(
     re.IGNORECASE,
 )
 LIST_ITEM_LINE_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s")
-MERGED_INLINE_ICON_LIST_RE = re.compile(
-    r"^(\s*)(?:[-*])\s+(<image\b[^>]+/>)\s+(.+)$",
-    re.IGNORECASE,
-)
 EMPTY_LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*])\s*$")
 SINGLE_LIST_ICON_LINE_RE = re.compile(
     r"^(\s*)(?:[-*])\s+(<image\b[^>]*/>)\s*$",
@@ -88,7 +80,7 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     )
     prelim_sync_roots = _sync_roots(
         prelim_path_by_url.values(),
-        _relocated_previous_paths(previous_pages, pages, prelim_path_by_url),
+        _relocated_previous_paths(previous_pages, frozenset(page.canonical_url for page in pages), prelim_path_by_url),
     )
     active_scope_folders = _sync_scope_folders(prelim_sync_roots) if prelim_sync_roots else ()
 
@@ -101,16 +93,24 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
     child_urls_by_parent = _build_child_mapping(pages)
     path_by_url = _build_path_mapping(pages, config, child_urls_by_parent, previous_pages, structure_items)
     link_path_by_url = _merge_catalog_paths(path_by_url, previous_pages)
+    current_urls = frozenset(page.canonical_url for page in pages)
     sync_roots = _sync_roots(
         path_by_url.values(),
-        _relocated_previous_paths(previous_pages, pages, path_by_url),
+        _relocated_previous_paths(previous_pages, current_urls, path_by_url),
     )
-    scoped_previous_hashes = {
-        path: content_hash
-        for path, content_hash in previous_hashes.items()
-        if _path_in_roots(path, sync_roots)
-    }
-    _remove_stale_catalog_pages(root, scoped_previous_hashes.keys(), path_by_url.values())
+    written_paths = frozenset(
+        str(path_by_url[page.canonical_url])
+        for page in pages
+        if page.canonical_url in path_by_url
+    )
+    scoped_previous_hashes = _scoped_sync_hashes(
+        previous_hashes,
+        previous_pages,
+        current_urls,
+        sync_roots,
+    )
+    stale_paths = _stale_deletion_paths(previous_pages, current_urls, path_by_url, sync_roots)
+    _remove_stale_catalog_pages(root, stale_paths, path_by_url.values())
     order_by_url = _build_order_mapping(pages)
     nav_parent_by_url = _nav_parent_by_url(pages)
     anchor_headings_by_url = {page.canonical_url: page.anchor_headings for page in pages}
@@ -191,24 +191,33 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
             )
 
     _write_progress("Updating catalog...")
-    merged_pages = _merge_catalog_items(previous_pages, written_pages, sync_roots, path_key="path")
+    merged_pages = _merge_catalog_items(
+        previous_pages,
+        written_pages,
+        sync_roots,
+        path_key="path",
+        current_urls=current_urls,
+    )
     merged_links = _merge_catalog_items(
         _read_catalog_items(catalog_dir / "links.yaml", "links"),
         written_links,
         sync_roots,
         path_key="from",
+        written_paths=written_paths,
     )
     merged_assets = _merge_catalog_items(
         _read_catalog_items(catalog_dir / "assets.yaml", "assets"),
         written_assets,
         sync_roots,
         path_key="page",
+        written_paths=written_paths,
     )
     merged_errors = _merge_catalog_items(
         _read_catalog_items(catalog_dir / "errors.yaml", "errors"),
         written_errors,
         sync_roots,
         path_key="path",
+        written_paths=written_paths,
     )
     _write_progress("Updating folder indexes...")
     _write_folder_indexes_from_catalog(root, merged_pages, sync_roots=sync_roots)
@@ -499,6 +508,7 @@ def _apply_structure_to_pages(
 
     by_url = {page.canonical_url: page for page in pages}
     mirrored_urls = _mirrored_catalog_urls(previous_pages or [])
+    ancestor_urls = _structure_ancestor_urls(pages, structure_items)
     for item in structure_items:
         canonical_url = item.get("canonical_url")
         if not isinstance(canonical_url, str) or not canonical_url:
@@ -519,9 +529,13 @@ def _apply_structure_to_pages(
         if canonical_url in mirrored_urls:
             continue
 
-        if active_scope_folders and not _path_in_scope_folders(
-            _structure_item_scope_path(item, previous_pages or []),
-            active_scope_folders,
+        if (
+            active_scope_folders
+            and canonical_url not in ancestor_urls
+            and not _path_in_scope_folders(
+                _structure_item_scope_path(item, previous_pages or []),
+                active_scope_folders,
+            )
         ):
             continue
 
@@ -572,7 +586,7 @@ def _should_write_page(
     if page.canonical_url in mirrored_urls:
         return False
     if sync_roots and not _path_in_roots(str(relpath), sync_roots):
-        return False
+        return _path_is_ancestor_of_sync_scope(relpath, sync_roots)
     return True
 
 
@@ -893,24 +907,103 @@ def _merge_catalog_items(
     sync_roots: tuple[PurePosixPath, ...],
     *,
     path_key: str,
+    current_urls: frozenset[str] | None = None,
+    written_paths: frozenset[str] | None = None,
 ) -> list[dict[str, object]]:
     if not sync_roots:
         return [*previous, *current]
     scope_folders = _sync_scope_folders(sync_roots)
-    preserved = [
-        item
-        for item in previous
-        if not _path_in_scope_folders(PurePosixPath(str(item.get(path_key) or "")), scope_folders)
-    ]
+    preserved: list[dict[str, object]] = []
+    for item in previous:
+        item_path = PurePosixPath(str(item.get(path_key) or ""))
+        if not _path_in_scope_folders(item_path, scope_folders):
+            preserved.append(item)
+            continue
+        if path_key == "path":
+            canonical_url = item.get("canonical_url")
+            if isinstance(canonical_url, str) and current_urls and canonical_url not in current_urls:
+                preserved.append(item)
+            continue
+        item_key = item.get(path_key)
+        if isinstance(item_key, str) and written_paths and item_key not in written_paths:
+            preserved.append(item)
     return [*preserved, *current]
+
+
+def _scoped_sync_hashes(
+    previous_hashes: dict[str, str],
+    previous_pages: list[dict[str, object]],
+    current_urls: frozenset[str],
+    sync_roots: tuple[PurePosixPath, ...],
+) -> dict[str, str]:
+    scoped_paths: set[str] = set()
+    for item in previous_pages:
+        canonical_url = item.get("canonical_url")
+        path = item.get("path")
+        if not isinstance(canonical_url, str) or canonical_url not in current_urls:
+            continue
+        if not isinstance(path, str) or not path:
+            continue
+        if sync_roots and not _path_in_roots(path, sync_roots):
+            continue
+        scoped_paths.add(path)
+    return {path: previous_hashes[path] for path in scoped_paths if path in previous_hashes}
+
+
+def _stale_deletion_paths(
+    previous_pages: list[dict[str, object]],
+    current_urls: frozenset[str],
+    path_by_url: dict[str, PurePosixPath],
+    sync_roots: tuple[PurePosixPath, ...],
+) -> set[str]:
+    current_paths = {str(path) for path in path_by_url.values()}
+    stale: set[str] = set()
+    for item in previous_pages:
+        canonical_url = item.get("canonical_url")
+        old_path = item.get("path")
+        if not isinstance(canonical_url, str) or canonical_url not in current_urls:
+            continue
+        if not isinstance(old_path, str) or not old_path or old_path in current_paths:
+            continue
+        if sync_roots and not _path_in_roots(old_path, sync_roots):
+            continue
+        stale.add(old_path)
+    for relocated in _relocated_previous_paths(previous_pages, current_urls, path_by_url):
+        stale.add(str(relocated))
+    return stale
+
+
+def _structure_ancestor_urls(pages: list[Page], structure_items: list[dict[str, object]]) -> set[str]:
+    parent_by_url: dict[str, str] = {}
+    for item in structure_items:
+        canonical_url = item.get("canonical_url")
+        nav_parent_url = item.get("nav_parent_url")
+        if isinstance(canonical_url, str) and isinstance(nav_parent_url, str) and nav_parent_url:
+            parent_by_url[canonical_url] = nav_parent_url
+    ancestors: set[str] = set()
+    for page in pages:
+        if page.placeholder:
+            continue
+        parent = parent_by_url.get(page.canonical_url)
+        while parent:
+            ancestors.add(parent)
+            parent = parent_by_url.get(parent)
+    return ancestors
+
+
+def _path_is_ancestor_of_sync_scope(relpath: PurePosixPath, sync_roots: tuple[PurePosixPath, ...]) -> bool:
+    placeholder_folder = relpath.parent if relpath.name == "_index.md" else relpath
+    for scope in _sync_scope_folders(sync_roots):
+        if scope != placeholder_folder and _is_relative_to(scope, placeholder_folder):
+            return True
+    return False
 
 
 def _relocated_previous_paths(
     previous_pages: list[dict[str, object]],
-    pages: list[Page],
+    current_urls: frozenset[str] | set[str],
     path_by_url: dict[str, PurePosixPath],
 ) -> list[PurePosixPath]:
-    current_urls = {page.canonical_url for page in pages}
     paths: list[PurePosixPath] = []
     for item in previous_pages:
         canonical_url = item.get("canonical_url")
@@ -1282,8 +1375,7 @@ def _rewrite_markdown_links(
         asset_by_source,
     )
     markdown = _normalize_media_spacing(markdown, config)
-    markdown = _split_inline_paragraph_images(markdown)
-    markdown = _collapse_inline_icon_images(markdown, config)
+    markdown = _isolate_gramax_images(markdown, config)
     markdown = _normalize_media_spacing(markdown, config)
     markdown = _drop_leading_heading_anchor_links(markdown, page.anchor_headings)
     return _render_details_sections(markdown)
@@ -1298,7 +1390,7 @@ def _normalize_media_spacing(markdown: str, config: MirrorConfig) -> str:
             in_fence = not in_fence
             output.append(line)
             continue
-        if not in_fence and _is_media_line(line) and not _is_inline_icon_image_line(line.strip(), config):
+        if not in_fence and _is_media_line(line):
             if output and output[-1].strip():
                 output.append("")
             output.append(line.strip())
@@ -1321,78 +1413,139 @@ def _is_media_line(line: str) -> bool:
     return bool(IMAGE_ONLY_LINE_RE.match(line))
 
 
-def _line_needs_image_split(line: str) -> bool:
-    if "<image" not in line.lower() or not INLINE_GRAMAX_IMAGE_TAG_RE.search(line):
-        return False
-    if SINGLE_LIST_ICON_LINE_RE.match(line):
-        return False
-    if _is_media_line(line):
-        return False
-    images = INLINE_GRAMAX_IMAGE_TAG_RE.findall(line)
-    if len(images) > 1:
-        return True
-    parts = INLINE_GRAMAX_IMAGE_TAG_RE.split(line, maxsplit=1)
-    if len(parts) < 3:
-        return False
-    before, _image, after = parts[0], parts[1], parts[2]
-    bullet_match = LIST_BULLET_PREFIX_RE.match(line)
-    if bullet_match:
-        return bool(after.strip())
-    return bool(before.strip() or after.strip())
-
-
-def _split_line_images(line: str) -> list[str]:
-    bullet_match = LIST_BULLET_PREFIX_RE.match(line)
-    if bullet_match:
-        indent, body = bullet_match.group(1), line[bullet_match.end() :]
-    else:
-        leading = len(line) - len(line.lstrip(" "))
-        indent = line[:leading] if leading else ""
-        body = line[leading:]
-
-    parts = INLINE_GRAMAX_IMAGE_TAG_RE.split(body)
-    output: list[str] = []
-    bullet_image_used = False
-
-    for index, part in enumerate(parts):
-        if index % 2 == 0:
-            text = part.strip()
-            if not text:
-                continue
-            if indent:
-                output.append(_inline_icon_text_line(text))
-            else:
-                if output and output[-1].strip():
-                    output.append("")
-                output.append(text)
-        else:
-            image_tag = part.strip()
-            if bullet_match and not bullet_image_used:
-                output.append(f"{indent}* {image_tag} ")
-                bullet_image_used = True
-            elif indent:
-                output.append(f"{indent}{image_tag}")
-            else:
-                if output and output[-1].strip():
-                    output.append("")
-                output.append(image_tag)
-                output.append("")
-    return output
-
-
-def _split_inline_paragraph_images(markdown: str) -> str:
+def _isolate_gramax_images(markdown: str, config: MirrorConfig) -> str:
+    del config  # reserved for future size-based tag normalization
+    lines = markdown.splitlines()
     output: list[str] = []
     in_fence = False
-    for line in markdown.splitlines():
+    index = 0
+    while index < len(lines):
+        line = lines[index]
         if _is_fenced_code_line(line):
             in_fence = not in_fence
             output.append(line)
+            index += 1
             continue
-        if in_fence or not _line_needs_image_split(line):
+        if in_fence:
             output.append(line)
+            index += 1
             continue
-        output.extend(_split_line_images(line))
+
+        empty_bullet = EMPTY_LIST_ITEM_RE.fullmatch(line)
+        if empty_bullet:
+            indent = empty_bullet.group(1)
+            next_index = index + 1
+            while next_index < len(lines) and not lines[next_index].strip():
+                next_index += 1
+            if next_index < len(lines) and _is_gramax_image_line(lines[next_index].strip()):
+                image_tag = _normalize_inline_icon_image_tag(lines[next_index].strip())
+                text_index = next_index + 1
+                while text_index < len(lines) and not lines[text_index].strip():
+                    text_index += 1
+                text = ""
+                if text_index < len(lines) and not LIST_ITEM_LINE_RE.match(lines[text_index]):
+                    text = lines[text_index].strip()
+                output.extend(_emit_isolated_image_block(image_tag))
+                if text:
+                    output.append(_format_isolated_list_text(indent, text))
+                index = text_index + 1 if text else next_index + 1
+                continue
+
+        bullet_icon = SINGLE_LIST_ICON_LINE_RE.match(line)
+        if bullet_icon:
+            indent = bullet_icon.group(1)
+            image_tag = _normalize_inline_icon_image_tag(bullet_icon.group(2))
+            next_index = index + 1
+            extra_images: list[str] = []
+            text = ""
+            while next_index < len(lines):
+                candidate = lines[next_index]
+                if not candidate.strip():
+                    next_index += 1
+                    continue
+                if _is_gramax_image_line(candidate.strip()):
+                    extra_images.append(_normalize_inline_icon_image_tag(candidate.strip()))
+                    next_index += 1
+                    continue
+                if LIST_ITEM_LINE_RE.match(candidate):
+                    break
+                text = candidate.strip()
+                next_index += 1
+                break
+            output.extend(_emit_isolated_image_block(image_tag))
+            for extra in extra_images:
+                output.extend(_emit_isolated_image_block(extra))
+            if text:
+                output.append(_format_isolated_list_text(indent, text))
+            index = next_index
+            continue
+
+        if _line_contains_gramax_image(line) and not _is_gramax_image_line(line.strip()):
+            output.extend(_isolate_mixed_image_line(line))
+            index += 1
+            continue
+
+        if _is_gramax_image_line(line.strip()):
+            output.extend(_emit_isolated_image_block(_normalize_inline_icon_image_tag(line.strip())))
+            index += 1
+            continue
+
+        output.append(line)
+        index += 1
     return "\n".join(output)
+
+
+def _line_contains_gramax_image(line: str) -> bool:
+    return "<image" in line.lower() and bool(INLINE_GRAMAX_IMAGE_TAG_RE.search(line))
+
+
+def _emit_isolated_image_block(image_tag: str) -> list[str]:
+    return ["", image_tag, ""]
+
+
+def _format_isolated_list_text(indent: str, text: str) -> str:
+    return f"{indent}* {text.strip()}"
+
+
+def _format_isolated_continuation_text(indent: str, text: str) -> str:
+    text = text.strip()
+    if not indent:
+        return text
+    if text.startswith("["):
+        return f"{indent}{text}"
+    return f"{indent}{text}"
+
+
+def _isolate_mixed_image_line(line: str) -> list[str]:
+    bullet_match = LIST_BULLET_PREFIX_RE.match(line)
+    if bullet_match:
+        indent = bullet_match.group(1)
+        body = line[bullet_match.end() :]
+        parts = INLINE_GRAMAX_IMAGE_TAG_RE.split(body)
+        output: list[str] = []
+        texts = [part.strip() for part in parts[::2] if part.strip()]
+        for image in parts[1::2]:
+            output.extend(_emit_isolated_image_block(_normalize_inline_icon_image_tag(image.strip())))
+        if texts:
+            output.append(_format_isolated_list_text(indent, " ".join(texts)))
+        return output
+
+    leading = len(line) - len(line.lstrip(" "))
+    indent = line[:leading]
+    body = line[leading:]
+    parts = INLINE_GRAMAX_IMAGE_TAG_RE.split(body)
+    output: list[str] = []
+    for part_index, part in enumerate(parts):
+        if part_index % 2 == 0:
+            text = part.strip()
+            if not text:
+                continue
+            if output and output[-1].strip():
+                output.append("")
+            output.append(_format_isolated_continuation_text(indent, text))
+        else:
+            output.extend(_emit_isolated_image_block(_normalize_inline_icon_image_tag(part.strip())))
+    return output
 
 
 def _render_details_sections(markdown: str) -> str:
@@ -1519,126 +1672,13 @@ def _is_inline_icon_asset(asset: Asset, config: MirrorConfig) -> bool:
     return max(asset.width, asset.height) <= max_px
 
 
-def _gramax_image_dimensions(line: str) -> tuple[int, int] | None:
-    match = GRAMAX_IMAGE_SIZE_RE.search(line)
-    if not match:
-        return None
-    if match.group(1) and match.group(2):
-        return int(match.group(1)), int(match.group(2))
-    if match.group(3) and match.group(4):
-        return int(match.group(4)), int(match.group(3))
-    return None
-
-
-def _is_inline_icon_image_line(line: str, config: MirrorConfig) -> bool:
-    max_px = config.image_inline_max_px
-    if not max_px or not line.lower().startswith("<image "):
-        return False
-    dimensions = _gramax_image_dimensions(line)
-    if not dimensions:
-        return False
-    width, height = dimensions
-    return max(width, height) <= max_px
-
-
-def _collapse_inline_icon_images(markdown: str, config: MirrorConfig) -> str:
-    if not config.image_inline_max_px:
-        return markdown
-
-    lines = markdown.splitlines()
-    output: list[str] = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        stripped = line.strip()
-        merged = MERGED_INLINE_ICON_LIST_RE.match(line)
-        if merged and merged.group(2).strip().lower().startswith("<image "):
-            indent, image_tag, text = merged.groups()
-            output.extend(_format_inline_icon_list_lines(indent, image_tag, text))
-            index += 1
-            continue
-
-        if _is_gramax_image_line(stripped):
-            image_tag = _normalize_inline_icon_image_tag(stripped)
-            previous_nonblank = _last_nonblank_line(output)
-            if previous_nonblank is not None and EMPTY_LIST_ITEM_RE.fullmatch(previous_nonblank):
-                while output and not output[-1].strip():
-                    output.pop()
-                list_match = EMPTY_LIST_ITEM_RE.fullmatch(output[-1])
-                assert list_match is not None
-                indent = list_match.group(1)
-                output.pop()
-                next_index = index + 1
-                while next_index < len(lines) and not lines[next_index].strip():
-                    next_index += 1
-                text = lines[next_index].strip() if next_index < len(lines) else ""
-                output.extend(_format_inline_icon_list_lines(indent, image_tag, text))
-                index = next_index + 1
-                continue
-
-        bullet_icon = SINGLE_LIST_ICON_LINE_RE.match(line)
-        if bullet_icon:
-            indent = bullet_icon.group(1)
-            image_tag = _normalize_inline_icon_image_tag(bullet_icon.group(2))
-            next_index = index + 1
-            extra_images: list[str] = []
-            text = ""
-            while next_index < len(lines):
-                candidate = lines[next_index]
-                if not candidate.strip():
-                    next_index += 1
-                    continue
-                if IMAGE_ONLY_LINE_RE.match(candidate):
-                    extra_images.append(_normalize_inline_icon_image_tag(candidate.strip()))
-                    next_index += 1
-                    continue
-                if LIST_ITEM_LINE_RE.match(candidate):
-                    break
-                text = candidate.strip()
-                next_index += 1
-                break
-            output.append(f"{indent}* {image_tag} ")
-            for extra in extra_images:
-                output.append(f"{indent}{extra}")
-            if text:
-                output.append(_inline_icon_text_line(text))
-            index = next_index
-            continue
-
-        output.append(line)
-        index += 1
-    return "\n".join(output)
-
-
 def _is_gramax_image_line(line: str) -> bool:
     return line.lower().startswith("<image ") and line.endswith("/>")
-
-
-def _last_nonblank_line(lines: list[str]) -> str | None:
-    for line in reversed(lines):
-        if line.strip():
-            return line
-    return None
 
 
 def _normalize_inline_icon_image_tag(tag: str) -> str:
     normalized = tag.replace('float="center"', 'float="left"')
     return GRAMAX_IMAGE_SCALE_RE.sub("", normalized)
-
-
-def _inline_icon_text_line(text: str) -> str:
-    text = text.strip()
-    if text.startswith("["):
-        return f" {text}"
-    return f"  {text}"
-
-
-def _format_inline_icon_list_lines(indent: str, image_tag: str, text: str) -> list[str]:
-    image_tag = _normalize_inline_icon_image_tag(image_tag)
-    lines = [f"{indent}* {image_tag} "]
-    if text.strip():
-        lines.append(_inline_icon_text_line(text))
-    return lines
 
 
 def _image_size_attrs(asset: Asset, config: MirrorConfig, *, inline_icon: bool = False) -> str:

@@ -58,10 +58,11 @@ python -m dochive --help
 
 ## Обзор команд
 
-Dochive предоставляет пять команд:
+Dochive предоставляет шесть команд:
 
 - `dochive mirror`: зеркалирует URL, локальный HTML-файл или локальную HTML-директорию в Markdown и YAML catalogs.
 - `dochive structure`: обнаруживает и сохраняет web navigation structure перед зеркалированием контента.
+- `dochive relink`: переписывает внешние Markdown-ссылки во внутренние пути в уже существующем зеркале без повторного crawl.
 - `dochive catalog`: печатает ожидаемые пути catalog files для mirror.
 - `dochive query`: выполняет lexical search по mirrored Markdown и YAML files.
 - `dochive publish`: коммитит и опционально push-ит mirror directory через Git.
@@ -238,6 +239,27 @@ dochive mirror `
 Используйте `--scope subtree` для controlled crawl. Используйте `--scope domain` только если намеренно хотите разрешить весь domain.
 Для focused crawls, которым нужны shared assets или common pages directory, добавьте один или несколько `--include-url-prefix` values.
 
+## Перепривязка внутренних Markdown-ссылок (`relink`)
+
+При порционном зеркалировании уже записанная страница может содержать абсолютные URL на другие разделы документации, которые были зеркалированы позже или пока известны только из `_catalog/structure.yaml`. Команда `dochive relink` исправляет такие ссылки офлайн: она собирает полную карту URL → path из `structure.yaml` и `pages.yaml`, переписывает тела Markdown и обновляет каталог без нового crawl.
+
+Типичный workflow:
+
+1. Один раз выполнить `dochive structure` для mirror root.
+2. Зеркалировать разделы повторными запусками `dochive mirror`.
+3. После каждой крупной догрузки запускать `dochive relink --root ./mirror/www.example.com`.
+
+```bash
+dochive relink --root ./mirror/www.example.com
+```
+
+Полезные опции:
+
+- `--dry-run`: показать, сколько страниц изменится, без записи файлов.
+- `--path-prefix docs/route`: обработать только страницы в одном поддереве mirror.
+
+Для ссылок на ещё не зеркалированные, но уже запланированные страницы нужен `structure.yaml`. Без него `relink` сможет переписать только URL, которые уже есть в `pages.yaml`.
+
 ## Output layout
 
 Dochive записывает вложенные страницы в layout, ожидаемый Gramax. Когда у crawled page есть child pages, страница становится папкой, а исходный page content записывается в `_index.md`; страницы без children остаются обычными Markdown files.
@@ -291,7 +313,7 @@ dochive mirror `
 
 Default `--image-size-mode intrinsic` читает реальные downloaded image dimensions и записывает их в Gramax image tag. Saved media хранится рядом с Markdown page: обычные `version_35.md` pages используют `version_35/`, а Gramax head pages используют ту же папку, что и `version_35/_index.md`.
 
-По умолчанию изображения не больше `--image-inline-max-px 52` (например иконки MadCap в списках) остаются inline внутри пункта списка с `float="left"`, а не превращаются в блочные `<image float="center">`, которые Gramax растягивает. Те же мелкие иконки в абзацном тексте выносятся на отдельную строку с пустыми строками до и после: Gramax ненадёжно рендерит `<image>` внутри строки предложения. Если в пункте списка несколько иконок, каждый тег `<image>` записывается на отдельной строке без текста после него.
+По умолчанию изображения не больше `--image-inline-max-px 52` (например иконки MadCap) получают `float="left"` и без атрибута `scale`, а не блочные `<image float="center">`, которые Gramax растягивает. Любой Gramax-тег `<image>` записывается отдельным блоком с пустой строкой до и после — никогда внутри буллита и никогда в одной строке с текстом предложения. Текст пункта списка, который шёл рядом с иконкой, пишется после image-блока, обычно как `* ...`.
 
 Для wide screenshots ограничьте rendered width с сохранением aspect ratio:
 

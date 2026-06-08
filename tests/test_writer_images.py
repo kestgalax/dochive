@@ -4,10 +4,9 @@ from pathlib import Path
 
 from dochive.models import Asset, MirrorConfig, Page
 from dochive.writer import (
-    _collapse_inline_icon_images,
     _is_inline_icon_asset,
+    _isolate_gramax_images,
     _render_image,
-    _split_inline_paragraph_images,
     write_mirror,
 )
 
@@ -45,7 +44,7 @@ def test_render_image_keeps_large_images_as_blocks() -> None:
     assert 'scale="100"' in rendered
 
 
-def test_collapse_inline_icon_images_splits_image_and_text_lines() -> None:
+def test_isolate_gramax_images_splits_empty_bullet_image_and_text() -> None:
     config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
     markdown = "\n".join(
         [
@@ -56,27 +55,30 @@ def test_collapse_inline_icon_images_splits_image_and_text_lines() -> None:
             " [Service request](req.htm) (SR) – definition text.",
         ]
     )
-    collapsed = _collapse_inline_icon_images(markdown, config)
-    lines = collapsed.splitlines()
-    assert lines[1] == '  * <image src="./31.png" crop="0,0,100,100" width="25px" height="20px" float="left"/> '
-    assert lines[2] == " [Service request](req.htm) (SR) – definition text."
-    assert "scale=" not in collapsed
+    isolated = _isolate_gramax_images(markdown, config)
+    lines = isolated.splitlines()
+    assert lines[1] == ""
+    assert lines[2] == '<image src="./31.png" crop="0,0,100,100" width="25px" height="20px" float="left"/>'
+    assert lines[3] == ""
+    assert lines[4] == "  * [Service request](req.htm) (SR) – definition text."
+    assert "scale=" not in isolated
 
 
-def test_collapse_inline_icon_images_splits_already_merged_list_items() -> None:
+def test_isolate_gramax_images_splits_merged_list_item() -> None:
     config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
     markdown = (
         '  * <image src="./31.png" crop="0,0,100,100" scale="100" width="25px" height="20px" '
         'float="left"/> [Service request](req.htm) (SR) – definition text.'
     )
-    collapsed = _collapse_inline_icon_images(markdown, config)
-    lines = collapsed.splitlines()
-    assert len(lines) == 2
-    assert lines[0].endswith('float="left"/> ')
-    assert lines[1].startswith(" [Service request]")
+    isolated = _isolate_gramax_images(markdown, config)
+    lines = isolated.splitlines()
+    assert lines[0] == ""
+    assert lines[1].endswith('float="left"/>')
+    assert lines[2] == ""
+    assert lines[3] == "  * [Service request](req.htm) (SR) – definition text."
 
 
-def test_collapse_inline_icon_images_indents_plain_text() -> None:
+def test_isolate_gramax_images_splits_bullet_icon_and_continuation_text() -> None:
     config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
     markdown = "\n".join(
         [
@@ -86,8 +88,37 @@ def test_collapse_inline_icon_images_indents_plain_text() -> None:
             "Mass request definition text.",
         ]
     )
-    collapsed = _collapse_inline_icon_images(markdown, config)
-    assert collapsed.splitlines()[-1] == "  Mass request definition text."
+    isolated = _isolate_gramax_images(markdown, config)
+    assert isolated.splitlines()[-1] == "  * Mass request definition text."
+
+
+def test_isolate_clock_icon_list_case() -> None:
+    config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
+    green = (
+        '<image src="./clockGreen_20x20-53aee3b47f5c.png" crop="0,0,100,100" '
+        'width="20px" height="20px" float="left"/>'
+    )
+    red = (
+        '<image src="./clockRed_20x20-5790b47e6e62.png" crop="0,0,100,100" '
+        'width="20px" height="20px" float="left"/>'
+    )
+    markdown = "\n".join(
+        [
+            "Возможные значения:",
+            f"    * {green}",
+            "  – есть время на реакцию;",
+            f"    * {red}",
+            "  – нет времени на реакцию;",
+        ]
+    )
+    isolated = _isolate_gramax_images(markdown, config)
+    assert f"* {green}" not in isolated
+    assert green in isolated
+    assert red in isolated
+    assert "  * – есть время на реакцию;" in isolated
+    assert "  * – нет времени на реакцию;" in isolated
+    assert isolated.index(green) < isolated.index("  * – есть время на реакцию;")
+    assert isolated.index(red) < isolated.index("  * – нет времени на реакцию;")
 
 
 def test_is_inline_icon_asset_respects_threshold() -> None:
@@ -103,14 +134,15 @@ def test_is_inline_icon_asset_respects_threshold() -> None:
     assert not _is_inline_icon_asset(Asset("https://example.com/a.png", "images", width=25, height=20), disabled)
 
 
-def test_split_inline_paragraph_images_splits_icon_in_sentence() -> None:
+def test_isolate_gramax_images_splits_icon_in_sentence() -> None:
+    config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
     image_tag = (
         '<image src="./lm_p_01_31x30-e324f20148bc.png" crop="0,0,100,100" '
         'width="31px" height="30px" float="left"/>'
     )
     markdown = f"При нажатии на плитку {image_tag} на панели быстрого доступа, отображаются все разделы."
-    split = _split_inline_paragraph_images(markdown)
-    lines = split.splitlines()
+    isolated = _isolate_gramax_images(markdown, config)
+    lines = isolated.splitlines()
     assert lines == [
         "При нажатии на плитку",
         "",
@@ -120,46 +152,42 @@ def test_split_inline_paragraph_images_splits_icon_in_sentence() -> None:
     ]
 
 
-def test_split_inline_paragraph_images_splits_list_item_icon_and_text() -> None:
-    markdown = (
-        '  * <image src="./31.png" crop="0,0,100,100" width="25px" height="20px" '
-        'float="left"/> [Service request](req.htm) (SR) – definition text.'
-    )
-    split = _split_inline_paragraph_images(markdown)
-    lines = split.splitlines()
-    assert len(lines) == 2
-    assert lines[0].endswith('float="left"/> ')
-    assert lines[1] == " [Service request](req.htm) (SR) – definition text."
-
-
-def test_split_inline_paragraph_images_leaves_single_icon_list_line_unchanged() -> None:
+def test_isolate_gramax_images_splits_single_icon_bullet_line() -> None:
+    config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
     markdown = '  * <image src="./31.png" crop="0,0,100,100" width="25px" height="20px" float="left"/> '
-    assert _split_inline_paragraph_images(markdown) == markdown
+    isolated = _isolate_gramax_images(markdown, config)
+    assert isolated.startswith("\n")
+    assert isolated.strip().endswith('float="left"/>')
+    assert "* <image" not in isolated
 
 
-def test_split_list_item_with_multiple_icons() -> None:
+def test_isolate_list_item_with_multiple_icons() -> None:
+    config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
     img06 = '<image src="./06.png" crop="0,0,100,100" width="27px" height="20px" float="left"/>'
     img07 = '<image src="./07.png" crop="0,0,100,100" width="16px" height="20px" float="left"/>'
     img08 = '<image src="./08.png" crop="0,0,100,100" width="18px" height="20px" float="left"/>'
     markdown = f"  * {img06} {img07} {img08} Объект управления – текст."
-    split = _split_inline_paragraph_images(markdown)
-    lines = split.splitlines()
-    assert lines[0] == f"  * {img06} "
-    assert lines[1] == f"  {img07}"
-    assert lines[2] == f"  {img08}"
-    assert lines[3] == "  Объект управления – текст."
+    isolated = _isolate_gramax_images(markdown, config)
+    assert img06 in isolated
+    assert img07 in isolated
+    assert img08 in isolated
+    assert "  * Объект управления – текст." in isolated
+    assert f"* {img06}" not in isolated
 
 
-def test_split_list_continuation_with_icon_and_text() -> None:
+def test_isolate_list_continuation_with_icon_and_text() -> None:
+    config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
     img07 = '<image src="./07.png" crop="0,0,100,100" width="16px" height="20px" float="left"/>'
     img08 = '<image src="./08.png" crop="0,0,100,100" width="18px" height="20px" float="left"/>'
     markdown = f"  {img07} {img08} Объект управления – текст."
-    split = _split_inline_paragraph_images(markdown)
-    lines = split.splitlines()
-    assert lines == [f"  {img07}", f"  {img08}", "  Объект управления – текст."]
+    isolated = _isolate_gramax_images(markdown, config)
+    lines = isolated.splitlines()
+    assert img07 in lines
+    assert img08 in lines
+    assert "  Объект управления – текст." in lines
 
 
-def test_collapse_handles_50px_icon_after_empty_list_marker() -> None:
+def test_isolate_handles_50px_icon_after_empty_list_marker() -> None:
     config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
     markdown = "\n".join(
         [
@@ -170,20 +198,21 @@ def test_collapse_handles_50px_icon_after_empty_list_marker() -> None:
             "Правило – элемент настройки услуг.",
         ]
     )
-    collapsed = _collapse_inline_icon_images(markdown, config)
-    lines = collapsed.splitlines()
-    assert lines[0] == '  * <image src="./05.png" crop="0,0,100,100" width="50px" height="20px" float="left"/> '
-    assert lines[1] == "  Правило – элемент настройки услуг."
-    assert "scale=" not in collapsed
-    assert 'float="center"' not in collapsed
+    isolated = _isolate_gramax_images(markdown, config)
+    lines = isolated.splitlines()
+    assert lines[1] == '<image src="./05.png" crop="0,0,100,100" width="50px" height="20px" float="left"/>'
+    assert lines[3] == "  * Правило – элемент настройки услуг."
+    assert "scale=" not in isolated
+    assert 'float="center"' not in isolated
 
 
-def test_split_inline_paragraph_images_handles_multiple_icons() -> None:
+def test_isolate_gramax_images_handles_multiple_icons_in_paragraph() -> None:
+    config = MirrorConfig(source="https://example.com/", out_dir=Path("mirror"))
     first = '<image src="./a.png" width="25px" height="20px" float="left"/>'
     second = '<image src="./b.png" width="24px" height="20px" float="left"/>'
     markdown = f"Текст1 {first} текст2 {second} текст3"
-    split = _split_inline_paragraph_images(markdown)
-    lines = split.splitlines()
+    isolated = _isolate_gramax_images(markdown, config)
+    lines = isolated.splitlines()
     assert lines == [
         "Текст1",
         "",
@@ -263,10 +292,9 @@ def test_write_mirror_formats_icon_images_for_gramax_lists(tmp_path: Path) -> No
         MirrorConfig(source=page_url, out_dir=tmp_path),
     )
     body = (root / "docs" / "page.md").read_text(encoding="utf-8").split("---", 2)[2]
-    assert '  * <image src="./icon.png"' in body
-    assert body.endswith('float="left"/> \n [Service request](req.htm) (SR) – definition text.\n') or (
-        'float="left"/> ' in body and "\n [Service request]" in body
-    )
+    assert '  * <image src="./icon.png"' not in body
+    assert '<image src="./icon.png"' in body
+    assert "  * [Service request](req.htm) (SR) – definition text." in body
     assert "scale=" not in body
     assert 'float="center"' not in body
 
@@ -323,7 +351,7 @@ def test_write_mirror_process_description_icons(tmp_path: Path) -> None:
         tag_end = line.lower().rfind("/>")
         assert tag_end != -1
         assert not line[tag_end + 2 :].strip(), f"text after image tag: {line!r}"
-    assert '  * <image src="./process_description/05_50x20.png"' in body
-    assert "  Правило – элемент настройки услуг." in body
-    assert "Объект управления – процессная активность." in body
+    assert "  * <image src=" not in body
+    assert "  * Правило – элемент настройки услуг." in body
+    assert "  * Объект управления – процессная активность." in body
     assert 'float="center"' not in body
