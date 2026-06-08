@@ -4,6 +4,14 @@
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.3] — 2026-06-08
+
+Branch `fix/madcap-spoiler-podrobnee`: restore MadCap «Подробнее» spoiler blocks in Gramax output.
+
+### Fixed
+
+- MadCap `MCDropDown` «Подробнее» links (`[Подробнее](#)` rewritten to the current page) are recognized again and rendered as Gramax `<details>` / `<summary>` blocks instead of a self-link on the same page (for example change-list entries on Naumen NSD Pro `stable-26`).
+
 ## [0.2.2] — 2026-06-08
 
 Branch `fix/gramax-inline-paragraph-images`: Gramax-safe spacing for inline icons in paragraph text.

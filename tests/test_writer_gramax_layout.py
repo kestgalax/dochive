@@ -3,8 +3,10 @@ from pathlib import Path, PurePosixPath
 from dochive.models import Asset, MirrorConfig, Page, StructureEntry, StructureRun
 from dochive.writer import (
     _asset_relpath,
+    _details_summary_text,
     _normalize_media_spacing,
     _relative_asset_path,
+    _render_details_sections,
     write_mirror,
     write_structure_catalog,
 )
@@ -1117,3 +1119,36 @@ def test_writer_does_not_overwrite_existing_doc_root(tmp_path: Path) -> None:
     )
 
     assert doc_root.read_text(encoding="utf-8") == "title: Existing\nsyntax: XML\n"
+
+
+def test_details_summary_recognizes_podrobnee_link() -> None:
+    assert _details_summary_text("[Подробнее](_index.md)") == "Подробнее"
+    assert _details_summary_text("[Подробнее](#)") == "Подробнее"
+    assert _details_summary_text("[Читать далее](page.md)") == "Читать далее"
+    assert _details_summary_text("[Подробное описание](page.md)") == "Подробное описание"
+
+
+def test_render_details_plain_text_podrobnee() -> None:
+    rendered = _render_details_sections("Краткое описание.\nПодробнее\nДетальное описание.\n")
+    assert "<details>" in rendered
+    assert "<summary>Подробнее</summary>" in rendered
+    assert "</details>" in rendered
+    assert "Детальное описание." in rendered
+    assert "[Подробнее]" not in rendered
+
+
+def test_render_details_wraps_madcap_spoiler_block() -> None:
+    markdown = """\
+  * RP29019 29674 Краткое описание.
+[Подробнее](_index.md)
+Детальное описание.
+  * RP29064 Следующий пункт.
+"""
+    rendered = _render_details_sections(markdown)
+
+    assert "<details>" in rendered
+    assert "<summary>Подробнее</summary>" in rendered
+    assert "</details>" in rendered
+    assert "Детальное описание." in rendered
+    assert "[Подробнее](_index.md)" not in rendered
+    assert "  * RP29064 Следующий пункт." in rendered
