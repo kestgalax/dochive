@@ -121,8 +121,32 @@ python -m dochive --help
 
 If HTTPS asset downloads fail with `CERTIFICATE_VERIFY_FAILED`, make sure the crawl runs with a Python environment that has CA certificates configured. A fresh `.venv` created from Homebrew `python3` usually inherits the Homebrew certificate bundle; the python.org macOS installer can also be fixed with `/Applications/Python 3.x/Install Certificates.command`.
 
+## Agent Skills
+
+Agent skills in `skills/` orchestrate structure discovery, mirroring strategy by volume, and post-run verification (placeholders, `errors.yaml`, live-site link leaks). Pattern follows [pochemuchka](https://github.com/kestgalax/pochemuchka). **Experimental:** not fully tested across sites and agent runtimes yet.
+
+**Install (pick one):**
+
+```bash
+# Vercel agent-skills CLI (if installed)
+npx skills add https://github.com/kestgalax/dochive --skill dochive-mirror
+npx skills add https://github.com/kestgalax/dochive --skill dochive-mirror-verify
+
+# Project installer (macOS/Linux)
+./setup.sh --target cursor
+
+# Manual (Cursor)
+cp -r skills/dochive-mirror .cursor/skills/
+cp -r skills/dochive-mirror-verify .cursor/skills/
+```
+
+Skills: **dochive-mirror** (preflight → mode → mirror) and **dochive-mirror-verify** (catalog checks + `check_mirror.sh`). Full guide: [docs/SKILLS.md](docs/SKILLS.md).
+
+Agents run preflight on existing mirrors and pick greenfield, incremental fill, or verify-only. After `git pull`, reinstall: `./setup.sh --target cursor --force`.
+
 ## Project Docs
 
+- [Agent Skills](docs/SKILLS.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Usage](docs/USAGE.md)
 - [Usage in Russian](docs/USAGE.ru.md)

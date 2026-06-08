@@ -4,6 +4,20 @@
 
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Agent skills `dochive-mirror` и `dochive-mirror-verify` в `skills/`: structure → план зеркалирования по объёму → verify после прогона. **Экспериментально:** сценарии пока не проходили полное тестирование на разных сайтах и в средах агентов.
+- Установщики `setup.sh` и `setup.bat` (как у pochemuchka) для OpenCode, Claude Code, Codex и Cursor.
+- Скрипт `skills/dochive-mirror-verify/scripts/check_mirror.sh` для проверки placeholders, `errors.yaml` и утечек ссылок на live-site.
+
+### Changed
+
+- Навыки: preflight, режимы greenfield/incremental/refresh/verify-only, пояснение `--out` vs `mirror_root`, запрет `--structure-mode links` на существующем MadCap-зеркале; после `git pull` переустановка: `./setup.sh --target cursor --force`.
+- Локальные установки навыков в IDE (`.cursor/skills/`, `.opencode/skills/`) больше не в git; источник — каталог `skills/`.
+- Краткий гайд по навыкам: `docs/SKILLS.ru.md` / `docs/SKILLS.md`.
+
 ## [0.2.4] — 2026-06-08
 
 Ветка `fix/incremental-cross-section-links`: переписывание ссылок и сохранение каталога при порционном mirror.
