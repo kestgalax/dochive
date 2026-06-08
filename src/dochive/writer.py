@@ -58,6 +58,12 @@ MERGED_INLINE_ICON_LIST_RE = re.compile(
     re.IGNORECASE,
 )
 EMPTY_LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*])\s*$")
+SINGLE_LIST_ICON_LINE_RE = re.compile(
+    r"^(\s*)(?:[-*])\s+(<image\b[^>]*/>)\s*$",
+    re.IGNORECASE,
+)
+LIST_BULLET_PREFIX_RE = re.compile(r"^(\s*)(?:[-*])\s+")
+IMAGE_ONLY_LINE_RE = re.compile(r"^\s*<image\b[^>]*/>\s*$", re.IGNORECASE)
 DOC_ROOT_FILENAME = ".doc-root.yaml"
 
 
@@ -1278,6 +1284,7 @@ def _rewrite_markdown_links(
     markdown = _normalize_media_spacing(markdown, config)
     markdown = _split_inline_paragraph_images(markdown)
     markdown = _collapse_inline_icon_images(markdown, config)
+    markdown = _normalize_media_spacing(markdown, config)
     markdown = _drop_leading_heading_anchor_links(markdown, page.anchor_headings)
     return _render_details_sections(markdown)
 
@@ -1309,7 +1316,68 @@ def _is_fenced_code_line(line: str) -> bool:
 
 def _is_media_line(line: str) -> bool:
     stripped = line.strip().lower()
-    return stripped.startswith(("<image ", "<video "))
+    if stripped.startswith("<video "):
+        return True
+    return bool(IMAGE_ONLY_LINE_RE.match(line))
+
+
+def _line_needs_image_split(line: str) -> bool:
+    if "<image" not in line.lower() or not INLINE_GRAMAX_IMAGE_TAG_RE.search(line):
+        return False
+    if SINGLE_LIST_ICON_LINE_RE.match(line):
+        return False
+    if _is_media_line(line):
+        return False
+    images = INLINE_GRAMAX_IMAGE_TAG_RE.findall(line)
+    if len(images) > 1:
+        return True
+    parts = INLINE_GRAMAX_IMAGE_TAG_RE.split(line, maxsplit=1)
+    if len(parts) < 3:
+        return False
+    before, _image, after = parts[0], parts[1], parts[2]
+    bullet_match = LIST_BULLET_PREFIX_RE.match(line)
+    if bullet_match:
+        return bool(after.strip())
+    return bool(before.strip() or after.strip())
+
+
+def _split_line_images(line: str) -> list[str]:
+    bullet_match = LIST_BULLET_PREFIX_RE.match(line)
+    if bullet_match:
+        indent, body = bullet_match.group(1), line[bullet_match.end() :]
+    else:
+        leading = len(line) - len(line.lstrip(" "))
+        indent = line[:leading] if leading else ""
+        body = line[leading:]
+
+    parts = INLINE_GRAMAX_IMAGE_TAG_RE.split(body)
+    output: list[str] = []
+    bullet_image_used = False
+
+    for index, part in enumerate(parts):
+        if index % 2 == 0:
+            text = part.strip()
+            if not text:
+                continue
+            if indent:
+                output.append(_inline_icon_text_line(text))
+            else:
+                if output and output[-1].strip():
+                    output.append("")
+                output.append(text)
+        else:
+            image_tag = part.strip()
+            if bullet_match and not bullet_image_used:
+                output.append(f"{indent}* {image_tag} ")
+                bullet_image_used = True
+            elif indent:
+                output.append(f"{indent}{image_tag}")
+            else:
+                if output and output[-1].strip():
+                    output.append("")
+                output.append(image_tag)
+                output.append("")
+    return output
 
 
 def _split_inline_paragraph_images(markdown: str) -> str:
@@ -1320,23 +1388,10 @@ def _split_inline_paragraph_images(markdown: str) -> str:
             in_fence = not in_fence
             output.append(line)
             continue
-        if in_fence or _is_media_line(line) or LIST_ITEM_LINE_RE.match(line):
+        if in_fence or not _line_needs_image_split(line):
             output.append(line)
             continue
-        if "<image" not in line.lower() or not INLINE_GRAMAX_IMAGE_TAG_RE.search(line):
-            output.append(line)
-            continue
-        parts = INLINE_GRAMAX_IMAGE_TAG_RE.split(line)
-        for index, part in enumerate(parts):
-            if index % 2 == 0:
-                text = part.strip()
-                if text:
-                    output.append(text)
-            else:
-                if output and output[-1].strip():
-                    output.append("")
-                output.append(part.strip())
-                output.append("")
+        output.extend(_split_line_images(line))
     return "\n".join(output)
 
 
@@ -1497,13 +1552,13 @@ def _collapse_inline_icon_images(markdown: str, config: MirrorConfig) -> str:
         line = lines[index]
         stripped = line.strip()
         merged = MERGED_INLINE_ICON_LIST_RE.match(line)
-        if merged and _is_inline_icon_image_line(merged.group(2).strip(), config):
+        if merged and merged.group(2).strip().lower().startswith("<image "):
             indent, image_tag, text = merged.groups()
             output.extend(_format_inline_icon_list_lines(indent, image_tag, text))
             index += 1
             continue
 
-        if _is_inline_icon_image_line(stripped, config):
+        if _is_gramax_image_line(stripped):
             image_tag = _normalize_inline_icon_image_tag(stripped)
             previous_nonblank = _last_nonblank_line(output)
             if previous_nonblank is not None and EMPTY_LIST_ITEM_RE.fullmatch(previous_nonblank):
@@ -1520,9 +1575,43 @@ def _collapse_inline_icon_images(markdown: str, config: MirrorConfig) -> str:
                 output.extend(_format_inline_icon_list_lines(indent, image_tag, text))
                 index = next_index + 1
                 continue
+
+        bullet_icon = SINGLE_LIST_ICON_LINE_RE.match(line)
+        if bullet_icon:
+            indent = bullet_icon.group(1)
+            image_tag = _normalize_inline_icon_image_tag(bullet_icon.group(2))
+            next_index = index + 1
+            extra_images: list[str] = []
+            text = ""
+            while next_index < len(lines):
+                candidate = lines[next_index]
+                if not candidate.strip():
+                    next_index += 1
+                    continue
+                if IMAGE_ONLY_LINE_RE.match(candidate):
+                    extra_images.append(_normalize_inline_icon_image_tag(candidate.strip()))
+                    next_index += 1
+                    continue
+                if LIST_ITEM_LINE_RE.match(candidate):
+                    break
+                text = candidate.strip()
+                next_index += 1
+                break
+            output.append(f"{indent}* {image_tag} ")
+            for extra in extra_images:
+                output.append(f"{indent}{extra}")
+            if text:
+                output.append(_inline_icon_text_line(text))
+            index = next_index
+            continue
+
         output.append(line)
         index += 1
     return "\n".join(output)
+
+
+def _is_gramax_image_line(line: str) -> bool:
+    return line.lower().startswith("<image ") and line.endswith("/>")
 
 
 def _last_nonblank_line(lines: list[str]) -> str | None:
