@@ -20,18 +20,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.2.5] — 2026-06-08
 
+Branch `cursor/image-isolation-relink-partial-sync`.
+
 ### Added
 
 - `dochive relink` rewrites absolute Markdown links to internal mirror paths offline using `_catalog/structure.yaml` and `pages.yaml`, with `--dry-run` and `--path-prefix` for scoped runs.
-- Tests in `tests/test_relink.py` and `tests/test_markdown_normalizer.py` for relink and empty-link cleanup.
+- Tests in `tests/test_relink.py`, `tests/test_markdown_normalizer.py`, and `tests/test_writer_images.py` for relink, empty-link cleanup, and Gramax image block isolation.
 
 ### Changed
 
-- `docs/USAGE.md` / `docs/USAGE.ru.md`: document incremental `relink` workflow after partial mirroring.
+- All Gramax `<image>` tags, including small MadCap list icons, are written as isolated blocks with blank lines before and after; list text follows the image block instead of staying inside the bullet line (for example clockGreen/clockRed icon lists).
+- `docs/USAGE.md` / `docs/USAGE.ru.md`: document unified block layout for `<image>` output and the incremental `relink` workflow after partial mirroring.
 
 ### Fixed
 
 - Markdown normalization drops empty link labels `[](url)` produced from invalid nested MadCap anchors (for example `доступно [](...)[по ссылке](...)` becomes `доступно [по ссылке](...)`), without touching `![](...)` or fenced code.
+- Partial mirror no longer deletes sibling pages in the same folder when a follow-up run mirrors only another page in that folder.
+- Follow-up mirrors with `structure.yaml` write ancestor placeholder pages needed for navigation (for example `introduction/_index.md` when mirroring a child section such as Change List).
 
 ## [0.2.4] — 2026-06-08
 
