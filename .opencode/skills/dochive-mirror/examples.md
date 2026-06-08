@@ -55,32 +55,12 @@ dochive mirror \
 ### 4. Verify
 
 ```bash
-bash skills/dochive-mirror-verify/scripts/check_mirror.sh \
+skills/dochive-mirror-verify/scripts/check_mirror.sh \
   --root ./mirror/<source_root> \
   --source-host www.naumen.ru
 ```
 
 Или примени навык **dochive-mirror-verify**.
-
-### 5. Smoke: одна TOC-страница (partial mirror)
-
-Когда структура и часть страниц уже есть, догрузить **одну** страницу без перезаписи соседних разделов:
-
-```bash
-python3 -m dochive mirror \
-  --source "https://www.naumen.ru/docs/sd/nsdpro/Content/sd/sd.htm?tocpath=%D0%9F%D1%80%D0%B0%D0%BA%D1%82%D0%B8%D0%BA%D0%B8%20NSD%C2%A0Pro%7C%D0%9F%D1%80%D0%B0%D0%BA%D1%82%D0%B8%D0%BA%D0%B0%20Servi%D1%81e%20Desk%7C_____0" \
-  --out ./mirror \
-  --render-js \
-  --max-depth 1 \
-  --max-pages 1 \
-  --scope subtree \
-  --anti-bot basic \
-  --save-assets images
-```
-
-Ожидаемый mirror path: `mirror/www.naumen.ru/docs/sd/nsdpro/content/nsdpro_practices/sd/_index.md`.
-
-После прогона проверь: целевая страница заполнена; `introduction/_index.md` и другие разделы **не** откатились в placeholder.
 
 ## Локальный HTML (без structure)
 

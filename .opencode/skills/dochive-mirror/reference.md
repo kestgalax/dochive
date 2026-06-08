@@ -37,7 +37,7 @@
 | `--noise-line` | повторяемый |
 | `--no-clean-markdown` | cleanup включён |
 | `--image-size-mode` | `intrinsic`; для скриншотов: `max-width` + `--image-max-width 900` |
-| `--image-inline-max-px` | 52 |
+| `--image-inline-max-px` | 48 |
 
 ## Каталоги зеркала (`<mirror_site_root>/_catalog/`)
 
@@ -61,19 +61,5 @@ Placeholder в Markdown: заголовок + «Раздел ожидает от
 ## Partial mirror (с 0.2.4)
 
 - Повторные прогоны в тот же `--out` сохраняют уже записанные разделы и каталог.
-- Переписывание internal links использует `_catalog/pages.yaml` целиком, не только URL текущего crawl (cross-section).
+- Переписывание internal links использует `_catalog/pages.yaml` целиком, не только URL текущего crawl.
 - CLI печатает прогресс на stderr (`Reading catalog...`, `Writing N pages...`, …).
-- Partial sync обновляет `_index.yaml` только в текущем sync scope.
-- Существующие локальные assets не перекачиваются; timeout URL загрузки — 30 с.
-
-## Gramax-вывод MadCap (что ожидать после mirror, 0.2.1–0.2.4+)
-
-| Элемент источника | Ожидаемый mirror |
-|-------------------|------------------|
-| HTML-таблицы | `{% table %}` + `{% colwidth=[…] %}` |
-| `<p class="comment">` | `:::note:false` callout |
-| `MCDropDown` «Подробнее» | `<details>` / `<summary>`, не `[Подробнее](#)` |
-| Мелкие иконки в **списке** (≤52 px) | inline в пункте списка, каждый `<image>` на своей строке |
-| Мелкие иконки в **абзаце** | отдельная строка `<image>` с пустыми строками до/после |
-| Крупные скриншоты | `--image-size-mode max-width --image-max-width 900` |
-| Заголовки `p.H4`, `h2 data-mc-autonum` | восстановленные `##` / `###` в Markdown |

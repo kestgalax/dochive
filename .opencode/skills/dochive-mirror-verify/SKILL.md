@@ -19,7 +19,7 @@ disable-model-invocation: true
 Из корня репозитория dochive:
 
 ```bash
-bash skills/dochive-mirror-verify/scripts/check_mirror.sh \
+skills/dochive-mirror-verify/scripts/check_mirror.sh \
   --root "<mirror_site_root>" \
   --source-host "<doc-host>"
 ```
@@ -30,18 +30,9 @@ bash skills/dochive-mirror-verify/scripts/check_mirror.sh \
 - Exit code `1` — есть placeholders, errors или утечки doc-ссылок в теле Markdown.
 - Exit code `2` — неверные аргументы или нет `_catalog/`.
 
-Скрипт печатает JSON-отчёт в stdout (stdlib Python, без PyYAML). Запуск: **`bash skills/.../check_mirror.sh`**, не через `python3`.
+Скрипт печатает JSON-отчёт в stdout (без внешних зависимостей, только stdlib Python).
 
-`--source-host` — hostname без схемы (`www.example.com`).
-
-### Интерпретация на большом partial mirror
-
-На частично зеркалированном сайте (много placeholders) **ожидаемо**:
-
-- высокий счётчик `placeholders` и `live_doc_link_leaks` по всему root;
-- это не обязательно регрессия одного smoke-прогона.
-
-Для smoke/догрузки одной ветки дополнительно проверь **вручную** целевую страницу и 1–2 соседних уже зеркалированных раздела (см. **dochive-mirror** → Partial mirror).
+`--source-host` — hostname без схемы (`www.example.com`). Для чисто локального зеркала без внешних doc-ссылок можно опустить проверку утечек, передав несуществующий host и интерпретируя только placeholders/errors (лучше всё равно указать исходный host, если зеркало с web).
 
 ## Ручной чеклист
 
@@ -82,7 +73,7 @@ rg '\]\(https?://[^)]*www\.example\.com' "<root>" --glob '*.md' \
 - `summary.yaml` → `unresolved_internal_links`
 - `links.yaml` → `kind: internal_unresolved`
 
-### 5. Incremental sync и partial mirror (0.2.4)
+### 5. Incremental sync
 
 После повторного mirror:
 
@@ -90,13 +81,7 @@ rg '\]\(https?://[^)]*www\.example\.com' "<root>" --glob '*.md' \
 cat "<root>/_catalog/sync.yaml"
 ```
 
-Ожидай осмысленные `added` / `changed` при догрузке; **массовые `deleted`** — сигнал регрессии.
-
-Partial mirror regression (обязательно после smoke):
-
-- известная ранее зеркалированная страница в **другом** разделе остаётся `placeholder: false`;
-- cross-section ссылка с новой страницы ведёт на `.md` в mirror, не на `https://` doc-host;
-- `_catalog/pages.yaml` не потерял записи других разделов.
+Ожидай осмысленные `added` / `changed` при догрузке; лишние `deleted` — сигнал регрессии.
 
 ### 6. Выборочное качество (ручное)
 
@@ -106,11 +91,7 @@ Partial mirror regression (обязательно после smoke):
 
 - восстановление `p class="H4"` / `h2 data-mc-autonum`;
 - Gramax `{% table %}` вместо битых pipe-таблиц;
-- MadCap `<p class="comment">` → `:::note:false` (не `note:true`);
-- «Подробнее» / `MCDropDown` → `<details>` / `<summary>`, не самоссылка `[Подробнее](#)`;
-- иконки в **списках** (≤52 px): inline, каждый `<image>` на отдельной строке в пункте;
-- иконки в **абзаце**: отдельная строка `<image>` с пустыми строками до/после;
-- крупные `<image>` — на отдельных строках с согласованными отступами (universal image spacing).
+- иконки в списках (inline, не растянутые блоки).
 
 ## Отчёт пользователю
 
@@ -126,8 +107,7 @@ Partial mirror regression (обязательно после smoke):
 |----------|----------|
 | Много placeholders | Догрузить ветку: `mirror` с URL узла из structure, тот же `--out` |
 | `internal_link_unresolved` | Проверить `--include-url-prefix`, scope, недозеркаленные соседи |
-| Утечки на live-host | Повтор mirror с актуальным кодом; проверить path mapping в `pages.yaml`; на partial mirror утечки в **незагруженных** разделах нормальны |
-| Partial mirror затёр соседний раздел | Проверь версию dochive ≥0.2.4; тот же `--out`, не пересоздавай structure |
-| Crawl errors | `--render-js`, `playwright install chromium`, `--anti-bot`, SSL/cafile в venv |
+| Утечки на live-host | Повтор mirror с актуальным кодом; проверить path mapping в `pages.yaml` |
+| Crawl errors | `--render-js`, `--anti-bot`, сеть, SSL/cafile в venv |
 
 Не меняй `--out` при исправлении — только дополняй mirror.
