@@ -30,6 +30,7 @@ class Page:
     links_internal: list[str] = field(default_factory=list)
     links_external: list[str] = field(default_factory=list)
     anchor_headings: dict[str, str] = field(default_factory=dict)
+    toc_link_labels: tuple[str, ...] = ()
     assets: list[Asset] = field(default_factory=list)
     source_path: Path | None = None
     placeholder: bool = False

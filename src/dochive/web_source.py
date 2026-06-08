@@ -11,7 +11,9 @@ from urllib.parse import unquote, urljoin, urlparse
 from .auth import request_headers, validate_auth_config
 from .confluence import confluence_body_html, confluence_links_and_assets, confluence_markdown
 from .html_extract import (
+    drop_madcap_toc_anchor_links,
     extract_html_anchor_headings,
+    extract_html_toc_link_labels,
     extract_html_videos,
     inject_html_comments,
     extract_html_document_title,
@@ -461,17 +463,20 @@ async def _fetch_pages_from_navigation_index(
             document_title = extract_html_document_title(html)
             if document_title:
                 title = document_title
+            markdown = drop_madcap_toc_anchor_links(markdown, html)
             markdown = promote_markdown_headings(markdown, html)
             markdown = inject_html_videos(markdown, html, entry.fetch_url)
             if config.source_type != "confluence":
                 markdown = inject_html_tables(markdown, html, entry.fetch_url)
             markdown = inject_html_comments(markdown, html)
         anchor_headings = extract_html_anchor_headings(html) if html else {}
+        toc_link_labels = extract_html_toc_link_labels(html) if html else ()
         markdown = normalize_markdown(
             markdown,
             clean=config.clean_markdown,
             extra_noise_lines=config.noise_lines,
             anchor_headings=anchor_headings,
+            toc_link_labels=toc_link_labels,
         )
         internal, external = _extract_page_links(links, entry.fetch_url, root_url, allowed_prefixes, config)
         assets = _extract_page_assets(media, html, markdown, entry.fetch_url)
@@ -490,6 +495,7 @@ async def _fetch_pages_from_navigation_index(
                 links_internal=internal,
                 links_external=external,
                 anchor_headings=anchor_headings,
+                toc_link_labels=toc_link_labels,
                 assets=assets,
                 status_code=getattr(result, "status_code", 200) or 200,
             )
@@ -537,17 +543,20 @@ async def _fetch_pages_from_structure_entries(
             document_title = extract_html_document_title(html)
             if document_title:
                 title = document_title
+            markdown = drop_madcap_toc_anchor_links(markdown, html)
             markdown = promote_markdown_headings(markdown, html)
             markdown = inject_html_videos(markdown, html, entry.fetch_url)
             if config.source_type != "confluence":
                 markdown = inject_html_tables(markdown, html, entry.fetch_url)
             markdown = inject_html_comments(markdown, html)
         anchor_headings = extract_html_anchor_headings(html) if html else {}
+        toc_link_labels = extract_html_toc_link_labels(html) if html else ()
         markdown = normalize_markdown(
             markdown,
             clean=config.clean_markdown,
             extra_noise_lines=config.noise_lines,
             anchor_headings=anchor_headings,
+            toc_link_labels=toc_link_labels,
         )
         internal, external = _extract_page_links(links, entry.fetch_url, root_url, allowed_prefixes, config)
         assets = _extract_page_assets(media, html, markdown, entry.fetch_url)
@@ -565,6 +574,7 @@ async def _fetch_pages_from_structure_entries(
                 links_internal=internal,
                 links_external=external,
                 anchor_headings=anchor_headings,
+                toc_link_labels=toc_link_labels,
                 assets=assets,
                 status_code=getattr(result, "status_code", 200) or 200,
             )

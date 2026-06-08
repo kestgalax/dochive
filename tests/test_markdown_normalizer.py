@@ -1,5 +1,10 @@
+from dochive.html_extract import (
+    drop_madcap_toc_anchor_links,
+    extract_html_toc_link_labels,
+    inject_html_tables,
+    promote_markdown_headings,
+)
 from dochive.markdown_normalizer import normalize_markdown
-from dochive.html_extract import inject_html_tables, promote_markdown_headings
 
 
 def test_separates_media_tags_with_blank_lines() -> None:
@@ -486,3 +491,86 @@ def test_normalize_markdown_keeps_empty_links_inside_code_fences() -> None:
     markdown = "```\n[](https://example.com/page.htm)\n```\n"
     normalized = normalize_markdown(markdown, clean=False)
     assert "[](https://example.com/page.htm)" in normalized
+
+
+def test_extract_html_toc_link_labels_reads_madcap_toc() -> None:
+    html = """
+    <ul class="TOC">
+      <li><a href="#006">Копирование текста и таблиц</a></li>
+      <li><a href="#005">Работа с таблицами</a></li>
+    </ul>
+    """
+    assert extract_html_toc_link_labels(html) == (
+        "Копирование текста и таблиц",
+        "Работа с таблицами",
+    )
+
+
+def test_normalize_markdown_drops_madcap_intra_page_toc_block() -> None:
+    markdown = "\n".join(
+        [
+            "### Редактор Froala",
+            "",
+            "- [Копирование текста и таблиц](https://example.com/input_field_RTF.htm)",
+            "- [Работа с таблицами](https://example.com/input_field_RTF.htm)",
+            "",
+            "На панели инструментов редактора Froala размещаются:",
+        ]
+    )
+    toc_labels = ("Копирование текста и таблиц", "Работа с таблицами")
+    normalized = normalize_markdown(
+        markdown,
+        anchor_headings={"006": "Копирование текста и таблиц", "005": "Работа с таблицами"},
+        toc_link_labels=toc_labels,
+    )
+    assert "Копирование текста и таблиц" not in normalized
+    assert "Работа с таблицами" not in normalized
+    assert "### Редактор Froala" in normalized
+    assert "На панели инструментов редактора Froala размещаются:" in normalized
+
+
+def test_promote_markdown_headings_does_not_insert_headings_for_madcap_toc() -> None:
+    html = """
+    <p class="H3">Редактор Froala</p>
+    <ul class="TOC">
+      <li><a href="#006">Копирование текста и таблиц</a></li>
+      <li><a href="#005">Работа с таблицами</a></li>
+    </ul>
+    <p>На панели инструментов редактора Froala размещаются:</p>
+    <p class="H4"><a name="006"></a>Копирование текста и таблиц</p>
+    <p>При вставке скопированного текста и таблиц сохраняется исходное форматирование.</p>
+    <p class="H4"><a name="005"></a>Работа с таблицами</p>
+    <p>Чтобы изменить параметры ячейки таблицы, нажмите на ячейку.</p>
+    """
+    page_url = "https://example.com/input_field_RTF.htm"
+    markdown = "\n".join(
+        [
+            "Редактор Froala",
+            "",
+            f"- [Копирование текста и таблиц]({page_url}#006)",
+            f"- [Работа с таблицами]({page_url}#005)",
+            "",
+            "На панели инструментов редактора Froala размещаются:",
+            "",
+            "При вставке скопированного текста и таблиц сохраняется исходное форматирование.",
+            "",
+            "Чтобы изменить параметры ячейки таблицы, нажмите на ячейку.",
+        ]
+    )
+    processed = promote_markdown_headings(drop_madcap_toc_anchor_links(markdown, html), html)
+    lines = processed.splitlines()
+    froala_index = lines.index("### Редактор Froala")
+    copy_index = lines.index("#### Копирование текста и таблиц")
+    assert copy_index > froala_index
+    assert "На панели инструментов редактора Froala размещаются:" in lines[froala_index + 1 : copy_index]
+    assert lines[froala_index + 1 : copy_index].count("####") == 0
+
+
+def test_normalize_markdown_keeps_unrelated_same_page_links() -> None:
+    markdown = "- [Скачать PDF](https://example.com/guide.htm)"
+    normalized = normalize_markdown(
+        markdown,
+        anchor_headings={"pdf": "PDF"},
+        toc_link_labels=("Копирование текста и таблиц",),
+    )
+    assert normalized.strip() == markdown.strip()

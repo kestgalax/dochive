@@ -5,7 +5,13 @@ from pathlib import Path
 from urllib.request import url2pathname
 from urllib.parse import unquote, urlparse
 
-from .html_extract import extract_html_anchor_headings, file_uri, is_local_file_reference, parse_html_document
+from .html_extract import (
+    extract_html_anchor_headings,
+    extract_html_toc_link_labels,
+    file_uri,
+    is_local_file_reference,
+    parse_html_document,
+)
 from .markdown_normalizer import normalize_markdown
 from .models import MirrorConfig, MirrorIssue, MirrorRun, Page
 from .url_utils import canonicalize_url
@@ -84,6 +90,7 @@ def crawl_local_html(config: MirrorConfig) -> MirrorRun:
 
         title = parser.title or path.stem.replace("-", " ").replace("_", " ").title()
         anchor_headings = extract_html_anchor_headings(html)
+        toc_link_labels = extract_html_toc_link_labels(html)
         pages.append(
             Page(
                 source_url=page_url,
@@ -95,12 +102,14 @@ def crawl_local_html(config: MirrorConfig) -> MirrorRun:
                     clean=config.clean_markdown,
                     extra_noise_lines=config.noise_lines,
                     anchor_headings=anchor_headings,
+                    toc_link_labels=toc_link_labels,
                 ),
                 depth=depth,
                 parent_url=parent_url,
                 links_internal=_unique(internal),
                 links_external=_unique(external),
                 anchor_headings=anchor_headings,
+                toc_link_labels=toc_link_labels,
                 assets=parser.assets,
                 source_path=path,
             )
