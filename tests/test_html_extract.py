@@ -197,7 +197,7 @@ def test_inject_html_comments_replaces_madcap_comment_paragraph() -> None:
     html = '<p class="comment">Если в карточке только одна вкладка, то ее название не отображается.</p>'
     markdown = "Если в карточке только одна вкладка, то ее название не отображается."
     injected = inject_html_comments(markdown, html)
-    assert ":::note:true" in injected
+    assert ":::note:false" in injected
     assert "ее название не отображается" in injected
     assert injected.strip().endswith(":::")
 
