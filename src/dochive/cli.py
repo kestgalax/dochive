@@ -10,6 +10,7 @@ from .publish import publish_mirror
 from .search import search_files
 from .url_utils import is_url
 from .web_source import build_web_structure, crawl_web
+from .relink import relink_mirror
 from .writer import write_mirror, write_structure_catalog
 
 SOURCE_TYPE_CHOICES = ("auto", "generic", "madcap", "wikijs", "confluence")
@@ -28,6 +29,8 @@ def main(argv: list[str] | None = None) -> int:
         return query_command(args)
     if args.command == "publish":
         return publish_command(args)
+    if args.command == "relink":
+        return relink_command(args)
     parser.print_help()
     return 1
 
@@ -212,6 +215,17 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--dry-run", action="store_true", help="Show Git actions without changing anything.")
     publish.add_argument("--init", action="store_true", help="Initialize Git in --root when it is not a worktree.")
     publish.add_argument("--push", action="store_true", help="Run git push after a successful commit.")
+
+    relink = subparsers.add_parser(
+        "relink",
+        help="Rewrite external Markdown links to internal paths using structure.yaml and pages.yaml.",
+    )
+    relink.add_argument("--root", required=True, type=Path, help="Mirror root directory.")
+    relink.add_argument("--dry-run", action="store_true", help="Report changes without writing files.")
+    relink.add_argument(
+        "--path-prefix",
+        help="Limit relinking to pages under this mirror-relative path prefix.",
+    )
     return parser
 
 
@@ -340,6 +354,28 @@ def publish_command(args: argparse.Namespace) -> int:
     )
     print(result.output)
     return 0 if result.ok else 2
+
+
+def relink_command(args: argparse.Namespace) -> int:
+    try:
+        result = relink_mirror(
+            args.root,
+            dry_run=args.dry_run,
+            path_prefix=args.path_prefix,
+        )
+    except Exception as exc:  # pragma: no cover - CLI boundary
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    mode = "dry-run" if args.dry_run else "relink"
+    print(
+        f"{mode}: changed={result.changed} unchanged={result.unchanged} skipped={result.skipped}"
+    )
+    if result.changed_paths:
+        print("Changed pages:")
+        for path in result.changed_paths:
+            print(f"  {path}")
+    return 0
 
 
 if __name__ == "__main__":

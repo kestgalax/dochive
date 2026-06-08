@@ -15,6 +15,7 @@ _NEXT_LINK_RE = re.compile(r"^\s*(?:\\?\*\\?\*)?\s*Далее\s*>>", re.IGNORECA
 _MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
 _MARKDOWN_HEADING_PARSE_RE = re.compile(r"^(\s{0,3}#{1,6}\s+)(.*\S)\s*$")
 _MARKDOWN_LINK_TOKEN_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_EMPTY_MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[(?:\s*)\]\([^)]+\)")
 _INLINE_PERMALINK_SYMBOL_RE = re.compile(r"^\s*(?:¶|#|🔗|🔖|link)\s+", re.IGNORECASE)
 _LEADING_MARKDOWN_LINK_RE = re.compile(r"^\s*\[([^\]]*)\]\((.*)\)\s+(.+)$")
 
@@ -54,6 +55,7 @@ def normalize_markdown(
         text = _drop_footer_chrome(text)
         text = _collapse_repeated_lines(text)
         text = _normalize_blank_lines(text)
+    text = _fix_empty_markdown_links(text)
     return text.strip() + "\n"
 
 
@@ -127,6 +129,23 @@ def _drop_code_copy_controls(text: str) -> str:
     for index, line in enumerate(lines):
         if _looks_like_copy_code_control(line) and _is_adjacent_to_fenced_code(lines, index):
             continue
+        output.append(line)
+    return "\n".join(output)
+
+
+def _fix_empty_markdown_links(text: str) -> str:
+    output: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        if _FENCED_CODE_RE.match(line):
+            in_fence = not in_fence
+            output.append(line)
+            continue
+        if not in_fence:
+            cleaned = _EMPTY_MARKDOWN_LINK_RE.sub("", line)
+            if cleaned != line:
+                cleaned = re.sub(r" {2,}", " ", cleaned)
+                line = cleaned
         output.append(line)
     return "\n".join(output)
 

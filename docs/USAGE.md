@@ -58,10 +58,11 @@ python -m dochive --help
 
 ## Command Overview
 
-Dochive exposes five commands:
+Dochive exposes six commands:
 
 - `dochive mirror`: mirror a URL, local HTML file, or local HTML directory into Markdown and YAML catalogs.
 - `dochive structure`: discover and save a web navigation structure before content mirroring.
+- `dochive relink`: rewrite external Markdown links to internal paths in an existing mirror without re-crawling.
 - `dochive catalog`: print the expected catalog file paths for a mirror.
 - `dochive query`: run lexical search over mirrored Markdown and YAML files.
 - `dochive publish`: commit and optionally push a mirror directory with Git.
@@ -238,6 +239,27 @@ dochive mirror `
 Use `--scope subtree` for a controlled crawl. Use `--scope domain` only when you intentionally want the whole domain to be eligible.
 For focused crawls that need shared assets or a common pages directory, add one or more `--include-url-prefix` values.
 
+## Relink Internal Markdown Links
+
+During incremental mirroring, an already mirrored page may still contain absolute URLs to other documentation pages that were mirrored later or are only known from `_catalog/structure.yaml`. `dochive relink` fixes those links offline: it reads the full URL-to-path map from `structure.yaml` and `pages.yaml`, rewrites Markdown bodies, and updates catalog metadata without a new crawl.
+
+Typical workflow:
+
+1. Run `dochive structure` once for the mirror root.
+2. Mirror documentation sections with repeated `dochive mirror` runs.
+3. Run `dochive relink --root ./mirror/www.example.com` after each major incremental batch.
+
+```bash
+dochive relink --root ./mirror/www.example.com
+```
+
+Useful options:
+
+- `--dry-run`: report how many pages would change without writing files.
+- `--path-prefix docs/route`: relink only pages under one mirror-relative subtree.
+
+`structure.yaml` is required for links to pages that are not mirrored yet but already have a planned Gramax path. Without it, `relink` can only resolve URLs already present in `pages.yaml`.
+
 ## Output Layout
 
 Dochive writes nested pages in the layout expected by Gramax. When a crawled page has child pages, the page becomes a folder and the original page content is written to `_index.md`; pages without children stay as regular Markdown files.
@@ -291,7 +313,7 @@ By default, linked screenshots are written in Gramax image form:
 
 The default `--image-size-mode intrinsic` reads the real downloaded image dimensions and writes them into the Gramax image tag. Saved media is stored next to the Markdown page: regular `version_35.md` pages use `version_35/`, while Gramax head pages use the same folder as `version_35/_index.md`.
 
-By default, images at or below `--image-inline-max-px 52` (for example MadCap list icons) stay inline inside list items with `float="left"` instead of centered block `<image>` tags that Gramax would upscale. The same small icons in paragraph text are written on their own line with blank lines before and after, because Gramax does not render mid-sentence `<image>` tags reliably. When a list item contains multiple icons, each `<image>` tag is written on its own line with no trailing text on that line.
+By default, images at or below `--image-inline-max-px 52` (for example MadCap list icons) use `float="left"` and omit the `scale` attribute instead of centered block `<image>` tags that Gramax would upscale. Every Gramax `<image>` tag is written as a separate block with a blank line before and after, never inside a bullet line or inline with sentence text. List text that belonged to the same item is written after the image block, usually as `* ...`.
 
 For wide screenshots, cap rendered width while preserving aspect ratio:
 

@@ -460,3 +460,29 @@ def test_iframe_converted_to_link() -> None:
     assert len(result.assets) == 1
     assert result.assets[0].source == "https://airtable.com/embed/app7pUKjVrkuUDJdv/shrokR65WxEtk8tOq?backgroundColor=blue&viewControls=on"
     assert result.assets[0].kind == "files"
+
+
+def test_normalize_markdown_drops_empty_links_before_named_link() -> None:
+    markdown = (
+        "Актуально для версии 3.0 и выше. Описание для прежних версий доступно "
+        "[](https://www.naumen.ru/docs/sd/nsdpro/Content/CFG_act/audit_KE_add_old.htm)"
+        "[по ссылке](https://www.naumen.ru/docs/sd/nsdpro/Content/route/route_card_old.htm).\n"
+    )
+    normalized = normalize_markdown(markdown, clean=False)
+    assert "[](https://www.naumen.ru/docs/sd/nsdpro/Content/CFG_act/audit_KE_add_old.htm)" not in normalized
+    assert (
+        "[по ссылке](https://www.naumen.ru/docs/sd/nsdpro/Content/route/route_card_old.htm)"
+        in normalized
+    )
+
+
+def test_normalize_markdown_preserves_image_links() -> None:
+    markdown = "![alt](thumb.png)\n"
+    normalized = normalize_markdown(markdown, clean=False)
+    assert normalized == "![alt](thumb.png)\n"
+
+
+def test_normalize_markdown_keeps_empty_links_inside_code_fences() -> None:
+    markdown = "```\n[](https://example.com/page.htm)\n```\n"
+    normalized = normalize_markdown(markdown, clean=False)
+    assert "[](https://example.com/page.htm)" in normalized

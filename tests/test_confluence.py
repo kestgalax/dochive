@@ -146,7 +146,12 @@ def test_confluence_asset_download_uses_auth_header_without_serializing_token(
         def __exit__(self, *args: object) -> None:
             self.close()
 
-    def fake_urlopen(request: object, context: object = None) -> FakeResponse:
+    def fake_urlopen(
+        request: object,
+        context: object = None,
+        timeout: float = 30.0,
+    ) -> FakeResponse:
+        del timeout
         captured["authorization"] = request.get_header("Authorization")
         return FakeResponse(b"png")
 

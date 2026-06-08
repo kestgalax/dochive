@@ -18,6 +18,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Stop tracking local IDE skill installs (`.cursor/skills/`, `.opencode/skills/`); canonical source stays in `skills/`.
 - Short agent skills guide: `docs/SKILLS.md` / `docs/SKILLS.ru.md`.
 
+## [0.2.5] — 2026-06-08
+
+### Added
+
+- `dochive relink` rewrites absolute Markdown links to internal mirror paths offline using `_catalog/structure.yaml` and `pages.yaml`, with `--dry-run` and `--path-prefix` for scoped runs.
+- Tests in `tests/test_relink.py` and `tests/test_markdown_normalizer.py` for relink and empty-link cleanup.
+
+### Changed
+
+- `docs/USAGE.md` / `docs/USAGE.ru.md`: document incremental `relink` workflow after partial mirroring.
+
+### Fixed
+
+- Markdown normalization drops empty link labels `[](url)` produced from invalid nested MadCap anchors (for example `доступно [](...)[по ссылке](...)` becomes `доступно [по ссылке](...)`), without touching `![](...)` or fenced code.
+
 ## [0.2.4] — 2026-06-08
 
 Branch `fix/incremental-cross-section-links`: incremental partial mirror link rewrite and catalog preservation.
