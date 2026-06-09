@@ -31,6 +31,9 @@ DEFAULT_NOISE_LINES = {
     "Skip To Main Content",
 }
 
+_WIKI_BACK_NAVIGATION_LABELS = frozenset({"назад", "back"})
+_WIKI_BACK_LINK_LABEL_RE = re.compile(r"^\[([^\]]+)\]\([^)]+\)$")
+
 
 def normalize_markdown(
     markdown: str,
@@ -51,6 +54,7 @@ def normalize_markdown(
         text = _drop_noise_lines(text, DEFAULT_NOISE_LINES | set(extra_noise_lines))
         text = _trim_leading_page_chrome(text)
         text = _drop_embedded_navigation_chrome(text)
+        text = _drop_wiki_back_navigation_headings(text)
         text = _normalize_heading_permalinks(text)
         text = _drop_heading_anchor_link_blocks(
             text,
@@ -469,6 +473,38 @@ def _trim_leading_page_chrome(text: str) -> str:
     if _looks_like_navigation_chrome(lines[:keep_from]):
         return "\n".join(lines[keep_from:])
     return text
+
+
+def _drop_wiki_back_navigation_headings(text: str) -> str:
+    output: list[str] = []
+    for line in text.splitlines():
+        if _is_wiki_back_navigation_heading(line):
+            continue
+        output.append(line)
+    return "\n".join(output)
+
+
+def _is_wiki_back_navigation_heading(line: str) -> bool:
+    match = _MARKDOWN_HEADING_PARSE_RE.match(line)
+    if not match:
+        return False
+    prefix, heading = match.groups()
+    if prefix.strip() != "######":
+        return False
+    return _wiki_back_label_text(heading) in _WIKI_BACK_NAVIGATION_LABELS
+
+
+def _wiki_back_label_text(text: str) -> str:
+    stripped = text.strip()
+    link_match = _WIKI_BACK_LINK_LABEL_RE.match(stripped)
+    if link_match:
+        stripped = link_match.group(1)
+    while True:
+        unwrapped = _unwrap_heading_emphasis(stripped)
+        if unwrapped == stripped:
+            break
+        stripped = unwrapped
+    return re.sub(r"[*_]+", "", stripped).strip().casefold()
 
 
 def _drop_embedded_navigation_chrome(text: str) -> str:
