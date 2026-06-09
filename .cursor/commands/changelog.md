@@ -1,7 +1,7 @@
 ---
 description: >-
-  Package the current chat session into bilingual CHANGELOG.md and
-  CHANGELOG.ru.md release sections.
+  Package the current chat session into bilingual CHANGELOG.ru.md and
+  CHANGELOG.md release sections.
 ---
 
 # Changelog from session
@@ -24,7 +24,7 @@ Skip refactors, test-only edits, and internal planning unless they matter to use
 - Pick the next semver **not already present** in [CHANGELOG.md](CHANGELOG.md).
 - Use today's date (`YYYY-MM-DD`) unless the user specifies another date.
 - Add the new release **before** the first existing `## [version]` block in each changelog file.
-- Keep the file header and `[English] | [Русский]` language links unchanged.
+- Keep the file header and `[Русский] | [English]` language links unchanged.
 
 ## English block for CHANGELOG.md
 

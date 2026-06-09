@@ -1,6 +1,6 @@
 # Использование Dochive
 
-[English](USAGE.md) | [Русский](USAGE.ru.md)
+[Русский](USAGE.ru.md) | [English](USAGE.md)
 
 ## Требования
 
@@ -478,7 +478,7 @@ _catalog/errors.yaml
 
 ## Обновление CHANGELOG
 
-В Cursor используйте slash-команду проекта `/changelog`, чтобы оформить текущую сессию чата в bilingual-записи `CHANGELOG.md` и `CHANGELOG.ru.md`. Определение команды: `.cursor/commands/changelog.md`.
+В Cursor используйте slash-команду проекта `/changelog`, чтобы оформить текущую сессию чата в bilingual-записи `CHANGELOG.ru.md` и `CHANGELOG.md`. Определение команды: `.cursor/commands/changelog.md`.
 
 ## Публикация через Git
 
