@@ -412,6 +412,55 @@ Body text.
     assert normalize_markdown(markdown) == "Principles for working on tasks\n## Principle 1\nBody text.\n"
 
 
+def test_drops_wiki_back_navigation_h6_headings() -> None:
+    markdown = """Детализация требований (Enterprise)
+###### назад
+###### [__назад__](https://wiki.service.sdpro.naumen.ru/методика-внедрения/enterprise)
+
+<table header="row">
+<tr>
+<td>Ответственный</td>
+</tr>
+</table>
+"""
+
+    assert normalize_markdown(markdown) == """Детализация требований (Enterprise)
+
+<table header="row">
+<tr>
+<td>Ответственный</td>
+</tr>
+</table>
+"""
+
+
+def test_drops_wiki_back_navigation_h6_anywhere_in_document() -> None:
+    markdown = """## Section
+Body before back link.
+###### [_**_назад_**_](https://wiki.example.com/parent)
+Body after back link.
+"""
+
+    assert normalize_markdown(markdown) == """## Section
+Body before back link.
+Body after back link.
+"""
+
+
+def test_keeps_non_back_h6_and_non_h6_back_text() -> None:
+    markdown = """###### Назад к списку
+## назад
+Перейдите по ссылке назад.
+###### [back to overview](https://example.com/overview)
+"""
+
+    assert normalize_markdown(markdown) == """###### Назад к списку
+## назад
+Перейдите по ссылке назад.
+###### [back to overview](https://example.com/overview)
+"""
+
+
 def test_promote_markdown_headings_drops_later_duplicate_after_anchor_insertion() -> None:
     html = """
 <p class="H3"><a name="Q4_22"></a>Q4 - 2022</p>

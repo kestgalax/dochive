@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover - fallback for minimal embedded environm
 from .auth import request_headers
 from .html_extract import is_local_file_reference
 from .image_size import read_image_size
-from .markdown_normalizer import _drop_leading_heading_anchor_links
+from .markdown_normalizer import _drop_leading_heading_anchor_links, normalize_markdown
 from .models import Asset, MirrorConfig, MirrorIssue, Page, StructureEntry, StructureRun
 from .url_utils import (
     canonicalize_url,
@@ -142,6 +142,13 @@ def write_mirror(pages: list[Page], config: MirrorConfig, *, issues: list[Mirror
             assets,
             config,
         )
+        if config.clean_markdown:
+            markdown = normalize_markdown(
+                markdown,
+                clean=True,
+                anchor_headings=page.anchor_headings,
+                toc_link_labels=page.toc_link_labels,
+            )
         content_hash = "sha256:" + hashlib.sha256(markdown.encode("utf-8")).hexdigest()
         frontmatter = _page_frontmatter(
             page,

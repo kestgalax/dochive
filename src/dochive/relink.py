@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+from .markdown_normalizer import normalize_markdown
 from .models import MirrorConfig, Page
 from .writer import (
     LINK_RE,
@@ -102,7 +103,8 @@ def relink_mirror(
             continue
 
         frontmatter = loads_yaml(frontmatter_text)
-        page = _page_from_frontmatter(frontmatter, body)
+        cleaned = normalize_markdown(body, clean=True)
+        page = _page_from_frontmatter(frontmatter, cleaned)
         rewritten = _rewrite_markdown_links(
             page,
             relpath,
@@ -112,7 +114,7 @@ def relink_mirror(
             config,
         )
 
-        if rewritten == body:
+        if _markdown_body_equals(rewritten, body):
             unchanged += 1
             all_links.extend(_link_catalog_entries(relpath, body, page, link_path_by_url))
             continue
@@ -271,6 +273,10 @@ def _link_catalog_entries(
         seen.add(key)
         entries.append({"from": str(relpath), "to": to_value, "kind": kind})
     return entries
+
+
+def _markdown_body_equals(left: str, right: str) -> bool:
+    return left.rstrip() + "\n" == right.rstrip() + "\n"
 
 
 def _write_progress(message: str) -> None:
