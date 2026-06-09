@@ -1,6 +1,6 @@
 # Changelog
 
-[English](CHANGELOG.md) | [Русский](CHANGELOG.ru.md)
+[Русский](CHANGELOG.ru.md) | [English](CHANGELOG.md)
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
@@ -16,7 +16,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Agent skills: preflight step, greenfield/incremental/refresh/verify-only modes, `--out` vs `mirror_root` guidance, and warnings against `--structure-mode links` on existing MadCap mirrors; reinstall with `./setup.sh --target cursor --force` after `git pull`.
 - Stop tracking local IDE skill installs (`.cursor/skills/`, `.opencode/skills/`); canonical source stays in `skills/`.
-- Short agent skills guide: `docs/SKILLS.md` / `docs/SKILLS.ru.md`.
+- Short agent skills guide: `docs/SKILLS.ru.md` / `docs/SKILLS.md`.
+
+## [0.2.6] — 2026-06-09
+
+Branch `fix/drop-wiki-back-h6-headings`.
+
+### Changed
+
+- Bilingual doc language switchers and paired-file references list Russian before English (`[Русский] | [English]`, `*.ru.md` / `*.md`).
+- Mirror write and `dochive relink` re-run Markdown cleanup when `clean_markdown` is enabled, so upgraded Dochive can drop stale Wiki.js chrome from existing mirrors without a full re-crawl.
+
+### Fixed
+
+- Markdown normalization removes Wiki.js H6 back-navigation chrome (`###### назад`, linked `###### [__назад__](...)`, and English `back` variants); Gramax already provides parent navigation through `_index.yaml` and catalogs.
 
 ## [0.2.5] — 2026-06-08
 

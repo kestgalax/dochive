@@ -1,6 +1,6 @@
 # Dochive CLI — шпаргалка для зеркалирования
 
-Полная документация: [docs/USAGE.md](../../docs/USAGE.md) (EN), [docs/USAGE.ru.md](../../docs/USAGE.ru.md) (RU).
+Полная документация: [docs/USAGE.ru.md](../../docs/USAGE.ru.md) (RU), [docs/USAGE.md](../../docs/USAGE.md) (EN).
 
 ## Пути: `--out` vs `mirror_root`
 

@@ -1,6 +1,6 @@
 # Dochive
 
-[English](README.md) | [Русский](README.ru.md) · [Changelog](CHANGELOG.md)
+[Русский](README.ru.md) | [English](README.md) · [История изменений](CHANGELOG.ru.md) | [Changelog](CHANGELOG.md)
 
 CLI tool for mirroring HTML documentation into a Markdown-first repository:
 

@@ -1,6 +1,6 @@
 # Agent Skills — mirroring
 
-[English](SKILLS.md) | [Русский](SKILLS.ru.md)
+[Русский](SKILLS.ru.md) | [English](SKILLS.md)
 
 Skills in [`skills/`](../skills/) help agents (Cursor, Claude Code, OpenCode, etc.) mirror documentation through Dochive safely: **from scratch**, **incremental section fill**, or **verify-only** on an existing mirror.
 
@@ -80,5 +80,5 @@ After a partial mirror, inspect `sync.yaml`: a large `deleted` count means catal
 
 ## See also
 
-- [USAGE.md](USAGE.md) — Dochive CLI
-- [README.md](../README.md) — package install
+- [USAGE.ru.md](USAGE.ru.md) / [USAGE.md](USAGE.md) — Dochive CLI
+- [README.ru.md](../README.ru.md) / [README.md](../README.md) — package install

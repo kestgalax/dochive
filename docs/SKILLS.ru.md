@@ -1,6 +1,6 @@
 # Agent Skills — зеркалирование
 
-[English](SKILLS.md) | [Русский](SKILLS.ru.md)
+[Русский](SKILLS.ru.md) | [English](SKILLS.md)
 
 Навыки в [`skills/`](../skills/) помогают агенту (Cursor, Claude Code, OpenCode и др.) безопасно зеркалировать документацию через Dochive: **с нуля**, **догрузкой раздела** или **проверкой** уже готового зеркала.
 
@@ -80,5 +80,5 @@ bash skills/dochive-mirror-verify/scripts/check_mirror.sh \
 
 ## См. также
 
-- [USAGE.ru.md](USAGE.ru.md) — CLI Dochive
-- [README.ru.md](../README.ru.md) — установка пакета
+- [USAGE.ru.md](USAGE.ru.md) / [USAGE.md](USAGE.md) — CLI Dochive
+- [README.ru.md](../README.ru.md) / [README.md](../README.md) — установка пакета

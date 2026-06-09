@@ -1,6 +1,6 @@
 # Dochive Usage
 
-[English](USAGE.md) | [Русский](USAGE.ru.md)
+[Русский](USAGE.ru.md) | [English](USAGE.md)
 
 ## Requirements
 
@@ -478,7 +478,7 @@ If remote image downloads fail with `CERTIFICATE_VERIFY_FAILED`, Python could no
 
 ## Changelog Updates
 
-In Cursor, use the project slash command `/changelog` to turn the current chat session into bilingual `CHANGELOG.md` and `CHANGELOG.ru.md` entries. The command definition lives in `.cursor/commands/changelog.md`.
+In Cursor, use the project slash command `/changelog` to turn the current chat session into bilingual `CHANGELOG.ru.md` and `CHANGELOG.md` entries. The command definition lives in `.cursor/commands/changelog.md`.
 
 ## Publish With Git
 

@@ -1,6 +1,6 @@
 # История изменений
 
-[English](CHANGELOG.md) | [Русский](CHANGELOG.ru.md)
+[Русский](CHANGELOG.ru.md) | [English](CHANGELOG.md)
 
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/).
 
@@ -17,6 +17,19 @@
 - Навыки: preflight, режимы greenfield/incremental/refresh/verify-only, пояснение `--out` vs `mirror_root`, запрет `--structure-mode links` на существующем MadCap-зеркале; после `git pull` переустановка: `./setup.sh --target cursor --force`.
 - Локальные установки навыков в IDE (`.cursor/skills/`, `.opencode/skills/`) больше не в git; источник — каталог `skills/`.
 - Краткий гайд по навыкам: `docs/SKILLS.ru.md` / `docs/SKILLS.md`.
+
+## [0.2.6] — 2026-06-09
+
+Ветка `fix/drop-wiki-back-h6-headings`.
+
+### Changed
+
+- В двуязычной документации переключатели языка и ссылки на пары файлов идут в порядке RU → EN (`[Русский] | [English]`, `*.ru.md` / `*.md`).
+- При записи зеркала и в `dochive relink` повторно выполняется Markdown cleanup (если включён `clean_markdown`), чтобы обновлённый Dochive мог убрать устаревший Wiki.js chrome из уже скачанного зеркала без полного re-crawl.
+
+### Fixed
+
+- Нормализация Markdown удаляет навигационный chrome Wiki.js в заголовках H6 (`###### назад`, `###### [__назад__](...)` и английские варианты `back`); родительская навигация в Gramax уже задаётся через `_index.yaml` и каталоги.
 
 ## [0.2.5] — 2026-06-08
 
